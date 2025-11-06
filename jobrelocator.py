@@ -316,9 +316,16 @@ class DynamicAPIAnalyzer:
     def get_dynamic_job_data(_self, profession):
         """Get job data dynamically from all available APIs"""
         states = {
-            'CA': 'California', 'TX': 'Texas', 'NY': 'New York', 'FL': 'Florida',
-            'WA': 'Washington', 'MA': 'Massachusetts', 'CO': 'Colorado', 'NC': 'North Carolina',
-            'GA': 'Georgia', 'IL': 'Illinois', 'VA': 'Virginia', 'AZ': 'Arizona'
+            'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas', 'CA': 'California',
+            'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware', 'FL': 'Florida', 'GA': 'Georgia',
+            'HI': 'Hawaii', 'ID': 'Idaho', 'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa',
+            'KS': 'Kansas', 'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+            'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi', 'MO': 'Missouri',
+            'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada', 'NH': 'New Hampshire', 'NJ': 'New Jersey',
+            'NM': 'New Mexico', 'NY': 'New York', 'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio',
+            'OK': 'Oklahoma', 'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
+            'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah', 'VT': 'Vermont',
+            'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia', 'WI': 'Wisconsin', 'WY': 'Wyoming'
         }
         
         job_data = []
@@ -349,7 +356,7 @@ class DynamicAPIAnalyzer:
                         state_job_data['avg_salary'] = usajobs_result['salary']['average']
                     state_job_data['api_responses'].append(usajobs_result)
                     api_usage['USAJOBS'] += 1
-                    time.sleep(0.3)  # Rate limiting
+                    time.sleep(0.1)  # Rate limiting
             
             if _self.adzuna_id and _self.adzuna_key:
                 adzuna_result = _self.call_adzuna_api(profession, state_name)
@@ -364,7 +371,7 @@ class DynamicAPIAnalyzer:
                             state_job_data['avg_salary'] = adzuna_result['salary']['average']
                     state_job_data['api_responses'].append(adzuna_result)
                     api_usage['Adzuna'] += 1
-                    time.sleep(0.3)  # Rate limiting
+                    time.sleep(0.1)  # Rate limiting
             
             # If no job data from APIs, use realistic estimates
             if state_job_data['job_openings'] == 0:
@@ -404,19 +411,33 @@ class DynamicAPIAnalyzer:
         state_multipliers = {
             'CA': 2.8, 'TX': 1.9, 'NY': 1.7, 'FL': 1.5, 'WA': 2.1,
             'MA': 1.8, 'CO': 1.7, 'NC': 1.5, 'GA': 1.4, 'IL': 1.4,
-            'VA': 1.6, 'AZ': 1.3
+            'VA': 1.6, 'AZ': 1.3, 'PA': 1.2, 'MI': 1.1, 'OH': 1.1,
+            'NJ': 1.3, 'TN': 1.1, 'MO': 1.0, 'MD': 1.3, 'WI': 1.0,
+            'MN': 1.1, 'IN': 0.9, 'AL': 0.8, 'SC': 0.9, 'LA': 0.8,
+            'KY': 0.8, 'OR': 1.2, 'OK': 0.8, 'CT': 1.1, 'IA': 0.7,
+            'UT': 1.2, 'NV': 1.0, 'AR': 0.7, 'MS': 0.6, 'KS': 0.7,
+            'NM': 0.8, 'NE': 0.6, 'WV': 0.6, 'ID': 0.7, 'HI': 0.8,
+            'NH': 0.9, 'ME': 0.7, 'RI': 0.8, 'MT': 0.6, 'DE': 0.8,
+            'SD': 0.5, 'ND': 0.5, 'AK': 0.6, 'VT': 0.6, 'WY': 0.5
         }
         
-        multiplier = state_multipliers.get(state, 1.0)
+        multiplier = state_multipliers.get(state, 0.8)
         return int(base * multiplier)
 
     @st.cache_data(ttl=86400)  # 24 hour cache
     def get_dynamic_supply_data(_self, profession):
         """Get professional supply data dynamically from available APIs"""
         states = {
-            'CA': 'California', 'TX': 'Texas', 'NY': 'New York', 'FL': 'Florida',
-            'WA': 'Washington', 'MA': 'Massachusetts', 'CO': 'Colorado', 'NC': 'North Carolina',
-            'GA': 'Georgia', 'IL': 'Illinois', 'VA': 'Virginia', 'AZ': 'Arizona'
+            'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas', 'CA': 'California',
+            'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware', 'FL': 'Florida', 'GA': 'Georgia',
+            'HI': 'Hawaii', 'ID': 'Idaho', 'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa',
+            'KS': 'Kansas', 'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+            'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi', 'MO': 'Missouri',
+            'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada', 'NH': 'New Hampshire', 'NJ': 'New Jersey',
+            'NM': 'New Mexico', 'NY': 'New York', 'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio',
+            'OK': 'Oklahoma', 'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
+            'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah', 'VT': 'Vermont',
+            'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia', 'WI': 'Wisconsin', 'WY': 'Wyoming'
         }
         
         supply_data = []
@@ -484,19 +505,33 @@ class DynamicAPIAnalyzer:
             national_employment = self.get_fallback_national_employment(profession)
             
         state_populations = {
-            'CA': 0.118, 'TX': 0.087, 'FL': 0.065, 'NY': 0.059, 'WA': 0.023,
-            'MA': 0.021, 'CO': 0.017, 'NC': 0.031, 'GA': 0.032, 'IL': 0.038,
-            'VA': 0.026, 'AZ': 0.022
+            'CA': 0.118, 'TX': 0.087, 'FL': 0.065, 'NY': 0.059, 'PA': 0.039,
+            'IL': 0.038, 'OH': 0.035, 'GA': 0.032, 'NC': 0.031, 'MI': 0.030,
+            'NJ': 0.026, 'VA': 0.026, 'WA': 0.023, 'AZ': 0.022, 'MA': 0.021,
+            'TN': 0.020, 'IN': 0.020, 'MO': 0.018, 'MD': 0.018, 'WI': 0.017,
+            'CO': 0.017, 'MN': 0.017, 'SC': 0.016, 'AL': 0.015, 'LA': 0.014,
+            'KY': 0.013, 'OR': 0.013, 'OK': 0.012, 'CT': 0.011, 'UT': 0.010,
+            'IA': 0.010, 'NV': 0.009, 'AR': 0.009, 'MS': 0.009, 'KS': 0.009,
+            'NM': 0.006, 'NE': 0.006, 'WV': 0.005, 'ID': 0.005, 'HI': 0.004,
+            'NH': 0.004, 'ME': 0.004, 'RI': 0.003, 'MT': 0.003, 'DE': 0.003,
+            'SD': 0.003, 'ND': 0.002, 'AK': 0.002, 'VT': 0.002, 'WY': 0.002
         }
         
         tech_concentration = {
             'CA': 2.5, 'WA': 2.2, 'MA': 2.0, 'NY': 1.8, 'CO': 1.7,
             'TX': 1.6, 'VA': 1.5, 'NC': 1.4, 'GA': 1.3, 'IL': 1.3,
-            'AZ': 1.2, 'FL': 1.1
+            'AZ': 1.2, 'UT': 1.4, 'OR': 1.3, 'MN': 1.2, 'NJ': 1.2,
+            'MD': 1.4, 'CT': 1.2, 'WI': 1.0, 'MI': 0.9, 'OH': 0.9,
+            'PA': 1.0, 'MO': 0.9, 'TN': 0.8, 'IN': 0.7, 'AL': 0.6,
+            'SC': 0.7, 'LA': 0.6, 'KY': 0.6, 'OK': 0.6, 'IA': 0.5,
+            'NV': 0.8, 'AR': 0.5, 'MS': 0.4, 'KS': 0.5, 'NM': 0.6,
+            'NE': 0.4, 'WV': 0.3, 'ID': 0.7, 'HI': 0.8, 'NH': 0.8,
+            'ME': 0.5, 'RI': 0.7, 'MT': 0.4, 'DE': 0.7, 'SD': 0.3,
+            'ND': 0.3, 'AK': 0.5, 'VT': 0.6, 'WY': 0.3
         }
         
-        state_share = state_populations.get(state, 0.02)
-        concentration = tech_concentration.get(state, 1.0)
+        state_share = state_populations.get(state, 0.01)
+        concentration = tech_concentration.get(state, 0.8)
         
         return int(national_employment * state_share * concentration)
 
@@ -513,7 +548,7 @@ class DynamicAPIAnalyzer:
         }.get(profession, 0.12)
         
         # Adjust based on state tech growth indicators
-        high_growth_states = ['TX', 'NC', 'TN', 'UT', 'CO', 'AZ', 'GA']
+        high_growth_states = ['TX', 'NC', 'TN', 'UT', 'CO', 'AZ', 'GA', 'FL', 'NV']
         if state in high_growth_states:
             return base_growth * 1.3
         return base_growth
@@ -560,7 +595,7 @@ analyzer = DynamicAPIAnalyzer()
 
 # Main dashboard
 st.title("🔥 Skills Gap Heat Map - Live API Data")
-st.markdown("### Real-time data from multiple APIs - Fully dynamic!")
+st.markdown("### Real-time data from multiple APIs - All 50 States!")
 
 # Test and display API status
 available_apis = analyzer.test_all_apis()
@@ -569,7 +604,7 @@ col1, col2, col3 = st.columns(3)
 with col1:
     st.metric("Available APIs", len(available_apis))
 with col2:
-    st.metric("States Analyzed", "12+")
+    st.metric("States Analyzed", "50")
 with col3:
     st.metric("Data Freshness", "Live")
 
@@ -588,7 +623,7 @@ selected_profession = st.selectbox("Select Profession", professions)
 
 if st.button("🔄 Fetch Live Data") or 'data_loaded' in st.session_state:
     try:
-        with st.spinner("Collecting real-time data from APIs..."):
+        with st.spinner("Collecting real-time data from all 50 states..."):
             job_data, api_usage = analyzer.get_dynamic_job_data(selected_profession)
             supply_data = analyzer.get_dynamic_supply_data(selected_profession)
             gap_data = analyzer.calculate_skills_gap(job_data, supply_data)
@@ -602,60 +637,88 @@ if st.button("🔄 Fetch Live Data") or 'data_loaded' in st.session_state:
             with usage_cols[i]:
                 st.metric(f"{api} Calls", count)
         
-        # Display the heat map
+        # Display the heat map with improved color scheme
         st.subheader("🗺️ Skills Gap Heat Map")
-        
-        # Create heat map
+        st.markdown("**Darker colors = Higher opportunity | Lighter colors = Lower opportunity**")
+
+        # Calculate display metrics
+        gap_data['salary_display'] = gap_data['avg_salary'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "N/A")
+        gap_data['jobs_per_pro'] = gap_data['supply_demand_ratio'].round(2)
+        gap_data['opportunity_score_rounded'] = gap_data['opportunity_score'].round(1)
+
+        # Create heat map with sequential color scale (light to dark)
         fig = px.choropleth(
             gap_data,
             locations='state',
             locationmode='USA-states',
             color='opportunity_score',
             scope='usa',
-            color_continuous_scale='RdYlGn_r',
+            color_continuous_scale='Blues',  # Light blue to dark blue
             range_color=(0, 100),
-            title=f'{selected_profession} - Skills Gap Heat Map<br><sub>Red: High Demand Gap | Green: Balanced Market</sub>',
+            title=f'{selected_profession} - Skills Gap Heat Map<br><sub>Dark Blue: High Opportunity | Light Blue: Lower Opportunity</sub>',
             hover_data={
                 'state_name': True,
                 'job_openings': True,
                 'professionals': True,
-                'supply_demand_ratio': ':.2f',
-                'avg_salary': '$,.0f',
+                'jobs_per_pro': ':.2f',
+                'salary_display': True,
+                'opportunity_score_rounded': True,
                 'opportunity_level': True
+            },
+            labels={
+                'opportunity_score': 'Opportunity Score',
+                'state_name': 'State',
+                'job_openings': 'Job Openings',
+                'professionals': 'Local Professionals',
+                'jobs_per_pro': 'Jobs per Professional',
+                'salary_display': 'Avg Salary',
+                'opportunity_score_rounded': 'Score'
             }
         )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Show top opportunities
-        st.subheader("🎯 Top Opportunity Markets")
-        top_opportunities = gap_data.nlargest(5, 'opportunity_score')[[
-            'state_name', 'job_openings', 'professionals', 'supply_demand_ratio',
-            'avg_salary', 'opportunity_level'
-        ]]
-        
-        st.dataframe(top_opportunities, use_container_width=True)
-        
-        # Show raw API data for transparency
-        with st.expander("🔍 View Raw API Data"):
-            st.subheader("Job Data from APIs")
-            st.dataframe(job_data)
-            
-            st.subheader("Supply Data from APIs") 
-            st.dataframe(supply_data)
-            
-    except Exception as e:
-        st.error(f"Error fetching data: {str(e)}")
-        st.info("This might be due to API rate limits or missing API keys. Try again in a few minutes.")
 
-# Add API setup instructions
-with st.sidebar:
-    st.subheader("🔑 API Setup")
-    st.markdown("""
-    **Required APIs:**
-    - **USAJOBS**: https://developer.usajobs.gov/
-    - **Adzuna**: https://developer.adzuna.com/
-    - **BLS**: https://data.bls.gov/registrationEngine/
-    
-    Add keys to Streamlit Cloud secrets.
-    """)
+        # Customize the layout
+        fig.update_layout(
+            height=600,
+            geo=dict(
+                bgcolor='rgba(0,0,0,0)',
+                lakecolor='rgba(0,0,0,0)',
+                landcolor='rgba(240,240,240,0.8)'
+            ),
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(size=12),
+            coloraxis_colorbar=dict(
+                title="Opportunity<br>Score",
+                thickness=15,
+                len=0.75,
+                yanchor="middle",
+                y=0.5
+            )
+        )
+
+        # Add state borders for better visibility
+        fig.update_geos(
+            showcoastlines=True,
+            coastlinecolor="white",
+            showland=True,
+            landcolor="lightgray",
+            showocean=True,
+            oceancolor="lightblue",
+            showlakes=True,
+            lakecolor="lightblue",
+            showrivers=True,
+            rivercolor="lightblue"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show ALL opportunity markets in order
+        st.subheader("🏆 All States Ranked by Opportunity Score")
+        st.markdown("**All 50 states sorted from highest to lowest opportunity**")
+
+        # Sort by opportunity score (highest first) and show ALL states
+        all_opportunities = gap_data.sort_values('opportunity_score', ascending=False)[[
+            'state_name', 'job_openings', 'professionals', 'jobs_per_pro',
+            'salary_display', 'opportunity_score_rounded', 'opportunity_level'
+        ]]
+
+        # Display all states in a sorted table
