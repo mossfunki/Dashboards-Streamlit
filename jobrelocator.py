@@ -722,3 +722,100 @@ if st.button("🔄 Fetch Live Data") or 'data_loaded' in st.session_state:
         ]]
 
         # Display all states in a sorted table
+        st.dataframe(
+            all_opportunities.rename(columns={
+                'state_name': 'State',
+                'job_openings': 'Job Openings',
+                'professionals': 'Local Professionals', 
+                'jobs_per_pro': 'Jobs per Professional',
+                'salary_display': 'Average Salary',
+                'opportunity_score_rounded': 'Opportunity Score',
+                'opportunity_level': 'Market Status'
+            }),
+            use_container_width=True,
+            height=600  # Scrollable table to see all states
+        )
+
+        # Color-coded summary by opportunity level
+        st.subheader("📈 Market Status Summary")
+
+        # Count states by opportunity level
+        status_counts = gap_data['opportunity_level'].value_counts()
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            critical_count = status_counts.get('CRITICAL GAP', 0)
+            st.metric("🔥 Critical Gap", critical_count, 
+                      delta=f"{critical_count} states" if critical_count > 0 else None,
+                      delta_color="off")
+
+        with col2:
+            high_count = status_counts.get('HIGH OPPORTUNITY', 0)
+            st.metric("🎯 High Opportunity", high_count,
+                      delta=f"{high_count} states" if high_count > 0 else None,
+                      delta_color="off")
+
+        with col3:
+            moderate_count = status_counts.get('MODERATE OPPORTUNITY', 0)
+            st.metric("📊 Moderate Opportunity", moderate_count,
+                      delta=f"{moderate_count} states" if moderate_count > 0 else None,
+                      delta_color="off")
+
+        with col4:
+            balanced_count = status_counts.get('BALANCED', 0)
+            st.metric("⚖️ Balanced", balanced_count,
+                      delta=f"{balanced_count} states" if balanced_count > 0 else None,
+                      delta_color="off")
+
+        # Top 5 critical gap markets
+        st.subheader("🚨 Top 5 Critical Gap Markets")
+        critical_gaps = gap_data[gap_data['opportunity_level'] == 'CRITICAL GAP'].nlargest(5, 'opportunity_score')
+
+        if not critical_gaps.empty:
+            for _, state in critical_gaps.iterrows():
+                with st.container():
+                    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                    
+                    with col1:
+                        st.markdown(f"**{state['state_name']}**")
+                        st.caption(f"Opportunity Score: {state['opportunity_score_rounded']}/100")
+                    
+                    with col2:
+                        st.metric("Jobs", f"{state['job_openings']:,}")
+                    
+                    with col3:
+                        st.metric("Professionals", f"{state['professionals']:,}")
+                    
+                    with col4:
+                        ratio = state['jobs_per_pro']
+                        st.metric("Ratio", f"{ratio:.1f}:1")
+                    
+                    st.progress(state['opportunity_score'] / 100)
+                    st.markdown("---")
+        else:
+            st.info("No critical gap markets found in current data.")
+
+        # Show raw API data for transparency
+        with st.expander("🔍 View Raw API Data"):
+            st.subheader("Job Data from APIs")
+            st.dataframe(job_data)
+            
+            st.subheader("Supply Data from APIs") 
+            st.dataframe(supply_data)
+            
+    except Exception as e:
+        st.error(f"Error fetching data: {str(e)}")
+        st.info("This might be due to API rate limits or missing API keys. Try again in a few minutes.")
+
+# Add API setup instructions
+with st.sidebar:
+    st.subheader("🔑 API Setup")
+    st.markdown("""
+    **Required APIs:**
+    - **USAJOBS**: https://developer.usajobs.gov/
+    - **Adzuna**: https://developer.adzuna.com/
+    - **BLS**: https://data.bls.gov/registrationEngine/
+    
+    Add keys to Streamlit Cloud secrets.
+    """)
