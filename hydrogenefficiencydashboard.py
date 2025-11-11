@@ -236,8 +236,92 @@ def analyze_routes(api_key, start, end, via_points, hydrogen_eff=60, elev_penalt
         
         gdf = gpd.GeoDataFrame(all_routes, crs='EPSG:4326')
         
-        # ... rest of your existing analysis code ...
-        # (Keep all your existing elevation sampling, calculations, etc.)
+        # Sample points along routes for elevation analysis
+        def sample_points(line, spacing_meters=500):
+            line_proj = line.to_crs(epsg=3310)
+            length = line_proj.geometry.length.values[0]
+            distances = np.arange(0, length, spacing_meters)
+            sampled_points = [line_proj.geometry.values[0].interpolate(d) for d in distances]
+            return gpd.GeoDataFrame(geometry=sampled_points, crs='EPSG:3310').to_crs(epsg=4326)
+        
+        all_points = []
+        for i, row in gdf.iterrows():
+            sampled = sample_points(gdf.loc[[i]])
+            sampled['route_id'] = row['route_id']
+            all_points.append(sampled)
+        
+        points_gdf = gpd.GeoDataFrame(pd.concat(all_points), crs='EPSG:4326')
+        
+        # Get elevation data
+        def get_elevation_batch(latlons):
+            url = 'https://api.open-elevation.com/api/v1/lookup'
+            locations = [{"latitude": lat, "longitude": lon} for lat, lon in latlons]
+            try:
+                response = requests.post(url, json={"locations": locations}, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                return [pt['elevation'] for pt in data['results']]
+            except Exception as e:
+                st.warning(f"Elevation API issue: {str(e)}")
+                return [np.nan] * len(latlons)
+        
+        with st.spinner("Fetching elevation data..."):
+            latlons = [(pt.y, pt.x) for pt in points_gdf.geometry]
+            batch_size = 100
+            batches = [latlons[i:i+batch_size] for i in range(0, len(latlons), batch_size)]
+            
+            elevations = []
+            for i, batch in enumerate(batches):
+                elevations += get_elevation_batch(batch)
+                time.sleep(0.5)
+            
+            points_gdf['elevation_m'] = elevations
+        
+        # Calculate elevation gain
+        elevation_gain = []
+        for route in points_gdf['route_id'].unique():
+            route_points = points_gdf[points_gdf['route_id'] == route].sort_index()
+            diff = route_points['elevation_m'].diff()
+            gain = diff[diff > 0].sum()
+            elevation_gain.append({'route_id': route, 'elevation_gain_m': gain})
+        
+        gain_df = pd.DataFrame(elevation_gain)
+        
+        # Calculate distances and efficiency
+        gdf['distance_miles'] = gdf.to_crs(epsg=3310).geometry.length / 1609.34
+        df = gdf[['route_id', 'distance_miles']].merge(gain_df, on='route_id')
+        
+        # Compute adjusted effective distance
+        df['effective_miles'] = df['distance_miles'] + (df['elevation_gain_m'] / elev_penalty)
+        
+        # Hydrogen consumption
+        df['hydrogen_kg'] = df['effective_miles'] / hydrogen_eff
+        df['hydrogen_per_mile'] = df['hydrogen_kg'] / df['distance_miles']
+        
+        # Calculate segment grades for visualization
+        def compute_segment_grades(points_df):
+            segments = []
+            for route in points_df['route_id'].unique():
+                points = points_df[points_df['route_id'] == route].reset_index()
+                for i in range(len(points) - 1):
+                    p1 = points.loc[i].geometry
+                    p2 = points.loc[i + 1].geometry
+                    line = LineString([p1, p2])
+                    
+                    horiz_dist = p1.distance(p2) * 111_139
+                    elev_diff = points.loc[i + 1, 'elevation_m'] - points.loc[i, 'elevation_m']
+                    grade = (elev_diff / horiz_dist) * 100 if horiz_dist > 0 else 0
+                    
+                    segments.append({
+                        'geometry': line,
+                        'route_id': route,
+                        'grade_pct': grade,
+                        'elevation_gain': elev_diff
+                    })
+            
+            return gpd.GeoDataFrame(segments, crs="EPSG:4326")
+        
+        segment_gdf = compute_segment_grades(points_gdf)
         
         return df, gdf, segment_gdf, points_gdf
         
@@ -398,24 +482,26 @@ if analyze_button:
 
 else:
     # Professional Welcome/Instructions
+    st.markdown('<div class="analysis-section">', unsafe_allow_html=True)
+    st.markdown("### Welcome to the Hydrogen Route Efficiency Analyzer")
     st.markdown("""
-    <div class="analysis-section">
-        <h3>Welcome to the Hydrogen Route Efficiency Analyzer</h3>
-        <p>This advanced analysis tool evaluates multiple routes between specified locations, 
-        calculating hydrogen fuel consumption while accounting for distance and elevation factors.</p>
-        
-        <h4>Getting Started:</h4>
-        <ol>
-            <li>Configure your API key in the sidebar (required for routing data)</li>
-            <li>Set origin and destination coordinates</li>
-            <li>Adjust efficiency parameters based on your vehicle specifications</li>
-            <li>Execute the analysis to compare route options</li>
-        </ol>
-        
-        <p><strong>Note:</strong> The analysis incorporates real elevation data and calculates 
-        adjusted energy requirements based on terrain characteristics.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    This advanced analysis tool evaluates multiple routes between specified locations, 
+    calculating hydrogen fuel consumption while accounting for distance and elevation factors.
+    """)
+    
+    st.markdown("#### Getting Started:")
+    st.markdown("""
+    1. Configure your API key in the sidebar (required for routing data)
+    2. Set origin and destination coordinates  
+    3. Adjust efficiency parameters based on your vehicle specifications
+    4. Execute the analysis to compare route options
+    """)
+    
+    st.markdown("""
+    **Note:** The analysis incorporates real elevation data and calculates 
+    adjusted energy requirements based on terrain characteristics.
+    """)
+    st.markdown('</div>', unsafe_allow_html=True)
     
     # Feature highlights in cards
     st.markdown('<div class="section-header">Analysis Features</div>', unsafe_allow_html=True)
