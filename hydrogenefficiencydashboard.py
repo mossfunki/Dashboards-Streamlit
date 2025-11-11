@@ -1,35 +1,62 @@
 import streamlit as st
 import os
+import sys
+
+# Check and install missing packages
+def check_and_install_packages():
+    missing_packages = []
+    
+    required_packages = {
+        'pandas': 'pandas',
+        'numpy': 'numpy', 
+        'requests': 'requests',
+        'matplotlib': 'matplotlib',
+        'openrouteservice': 'openrouteservice',
+        'geopandas': 'geopandas',
+        'shapely': 'shapely',
+        'folium': 'folium',
+        'branca': 'branca',
+        'streamlit_folium': 'streamlit-folium'
+    }
+    
+    for import_name, package_name in required_packages.items():
+        try:
+            if import_name == 'streamlit_folium':
+                __import__('streamlit_folium')
+            else:
+                __import__(import_name)
+        except ImportError:
+            missing_packages.append(package_name)
+    
+    return missing_packages
+
+# Check for missing packages
+missing_packages = check_and_install_packages()
+
+if missing_packages:
+    st.error(f"❌ Missing packages: {', '.join(missing_packages)}")
+    st.info(f"""
+    **To install missing packages, add this to your requirements.txt:**
+    ```
+    {'\n'.join(missing_packages)}
+    ```
+    """)
+    st.stop()
+
+# Now import all packages
 import pandas as pd
 import numpy as np
 import requests
 import time
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
-
-# Try to import optional dependencies with fallbacks
-try:
-    import openrouteservice
-    ORS_AVAILABLE = True
-except ImportError:
-    ORS_AVAILABLE = False
-    st.warning("openrouteservice package not available. Please install it.")
-
-try:
-    import geopandas as gpd
-    from shapely.geometry import LineString, Point
-    GEOPANDAS_AVAILABLE = True
-except ImportError:
-    GEOPANDAS_AVAILABLE = False
-    st.warning("geopandas or shapely not available. Please install them.")
-
-try:
-    import folium
-    import branca.colormap as cm
-    from streamlit_folium import folium_static
-    FOLIUM_AVAILABLE = True
-except ImportError:
-    FOLIUM_AVAILABLE = False
-    st.warning("folium or branca not available. Please install them.")
+import openrouteservice
+import geopandas as gpd
+from shapely.geometry import LineString, Point
+import folium
+import branca.colormap as cm
+from streamlit_folium import folium_static
 
 # Page configuration
 st.set_page_config(
@@ -70,41 +97,16 @@ st.markdown("""
         border: 1px solid #f5c6cb;
         color: #721c24;
     }
-    .warning-box {
-        background-color: #fff3cd;
-        border: 1px solid #ffeaa7;
-        border-radius: 5px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 # Title and description
 st.markdown('<h1 class="main-header">🚗 Hydrogen Route Efficiency Analyzer</h1>', unsafe_allow_html=True)
 
-# Check if all required packages are available
-missing_packages = []
-if not ORS_AVAILABLE:
-    missing_packages.append("openrouteservice")
-if not GEOPANDAS_AVAILABLE:
-    missing_packages.extend(["geopandas", "shapely"])
-if not FOLIUM_AVAILABLE:
-    missing_packages.extend(["folium", "branca", "streamlit-folium"])
-
-if missing_packages:
-    st.error(f"❌ Missing required packages: {', '.join(missing_packages)}")
-    st.info("""
-    **Please install the missing packages by adding them to your requirements.txt file:**
-    ```
-    openrouteservice
-    geopandas
-    folium
-    branca
-    streamlit-folium
-    shapely
-    ```
-    """)
+st.markdown("""
+This dashboard analyzes multiple driving routes with a focus on hydrogen fuel efficiency. 
+It calculates energy consumption based on both distance and elevation changes.
+""")
 
 # API Key management
 def get_api_key():
@@ -186,10 +188,6 @@ elevation_penalty = st.sidebar.slider(
 def analyze_routes(api_key, start, end, via_points, hydrogen_eff=60, elev_penalty=25):
     """Main function to analyze route efficiency"""
     
-    if not all([ORS_AVAILABLE, GEOPANDAS_AVAILABLE, FOLIUM_AVAILABLE]):
-        st.error("❌ Required packages are not available. Please check the installation.")
-        return None
-    
     if not api_key:
         st.error("❌ Please configure your OpenRouteService API key")
         st.info("""
@@ -270,10 +268,9 @@ def analyze_routes(api_key, start, end, via_points, hydrogen_eff=60, elev_penalt
             elevations = []
             for i, batch in enumerate(batches):
                 elevations += get_elevation_batch(batch)
-                # Show progress
                 if len(batches) > 1:
                     st.write(f"Progress: {i+1}/{len(batches)} batches")
-                time.sleep(0.5)  # Rate limiting
+                time.sleep(0.5)
             
             points_gdf['elevation_m'] = elevations
         
@@ -282,7 +279,7 @@ def analyze_routes(api_key, start, end, via_points, hydrogen_eff=60, elev_penalt
         for route in points_gdf['route_id'].unique():
             route_points = points_gdf[points_gdf['route_id'] == route].sort_index()
             diff = route_points['elevation_m'].diff()
-            gain = diff[diff > 0].sum()  # only uphill gain
+            gain = diff[diff > 0].sum()
             elevation_gain.append({'route_id': route, 'elevation_gain_m': gain})
         
         gain_df = pd.DataFrame(elevation_gain)
@@ -308,13 +305,8 @@ def analyze_routes(api_key, start, end, via_points, hydrogen_eff=60, elev_penalt
                     p2 = points.loc[i + 1].geometry
                     line = LineString([p1, p2])
                     
-                    # Approximate horizontal distance
-                    horiz_dist = p1.distance(p2) * 111_139  # degrees to meters approx
-                    
-                    # Elevation gain
+                    horiz_dist = p1.distance(p2) * 111_139
                     elev_diff = points.loc[i + 1, 'elevation_m'] - points.loc[i, 'elevation_m']
-                    
-                    # Grade (%)
                     grade = (elev_diff / horiz_dist) * 100 if horiz_dist > 0 else 0
                     
                     segments.append({
@@ -334,257 +326,241 @@ def analyze_routes(api_key, start, end, via_points, hydrogen_eff=60, elev_penalt
         st.error(f"❌ Error in route analysis: {str(e)}")
         return None
 
-# Only show the analyze button if all packages are available
-if all([ORS_AVAILABLE, GEOPANDAS_AVAILABLE, FOLIUM_AVAILABLE]):
-    # Run analysis when button is clicked
-    if st.sidebar.button("🚀 Analyze Routes", type="primary"):
-        start_coord = [start_lon, start_lat]
-        end_coord = [end_lon, end_lat]
-        via_points = [[via1_lon, via1_lat], [via2_lon, via2_lat]]
+# Run analysis when button is clicked
+if st.sidebar.button("🚀 Analyze Routes", type="primary"):
+    start_coord = [start_lon, start_lat]
+    end_coord = [end_lon, end_lat]
+    via_points = [[via1_lon, via1_lat], [via2_lon, via2_lat]]
+    
+    result = analyze_routes(api_key, start_coord, end_coord, via_points, 
+                           hydrogen_efficiency, elevation_penalty)
+    
+    if result:
+        df, gdf, segment_gdf, points_gdf = result
         
-        result = analyze_routes(api_key, start_coord, end_coord, via_points, 
-                               hydrogen_efficiency, elevation_penalty)
+        # Display results
+        st.header("📊 Route Comparison Results")
         
-        if result:
-            df, gdf, segment_gdf, points_gdf = result
-            
-            # Display results
-            st.header("📊 Route Comparison Results")
-            
-            # Metrics in columns
-            col1, col2, col3, col4 = st.columns(4)
-            
-            best_route = df.loc[df['hydrogen_kg'].idxmin()]
-            
-            with col1:
-                st.metric(
-                    "🏆 Most Efficient Route", 
-                    best_route['route_id'],
-                    delta=f"✅ Saves {df['hydrogen_kg'].max() - best_route['hydrogen_kg']:.2f} kg H₂"
-                )
-            
-            with col2:
-                st.metric(
-                    "⛽ Best Hydrogen Consumption", 
-                    f"{best_route['hydrogen_kg']:.2f} kg",
-                    delta=f"📈 {best_route['hydrogen_per_mile']*1000:.1f} g/mile"
-                )
-            
-            with col3:
-                shortest_route = df.loc[df['distance_miles'].idxmin()]
-                st.metric(
-                    "📏 Shortest Distance", 
-                    f"{shortest_route['distance_miles']:.1f} miles",
-                    delta=shortest_route['route_id']
-                )
-            
-            with col4:
-                min_elev_route = df.loc[df['elevation_gain_m'].idxmin()]
-                st.metric(
-                    "⛰️ Least Elevation Gain", 
-                    f"{min_elev_route['elevation_gain_m']:.0f} m",
-                    delta=min_elev_route['route_id']
-                )
-            
-            # Detailed comparison table
-            st.subheader("📋 Detailed Route Comparison")
-            
-            display_df = df.copy()
-            display_df['distance_miles'] = display_df['distance_miles'].round(1)
-            display_df['elevation_gain_m'] = display_df['elevation_gain_m'].round(0)
-            display_df['effective_miles'] = display_df['effective_miles'].round(1)
-            display_df['hydrogen_kg'] = display_df['hydrogen_kg'].round(2)
-            display_df['hydrogen_per_mile'] = (display_df['hydrogen_per_mile'] * 1000).round(1)
-            
-            display_df = display_df.rename(columns={
-                'route_id': 'Route',
-                'distance_miles': 'Distance (miles)',
-                'elevation_gain_m': 'Elevation Gain (m)',
-                'effective_miles': 'Effective Distance (miles)',
-                'hydrogen_kg': 'Hydrogen (kg)',
-                'hydrogen_per_mile': 'Efficiency (g/mile)'
-            })
-            
-            # Style the best route
-            def highlight_best(row):
-                if row['Hydrogen (kg)'] == df['hydrogen_kg'].min():
-                    return ['background-color: #d4edda'] * len(row)
-                else:
-                    return [''] * len(row)
-            
-            st.dataframe(display_df.style.apply(highlight_best, axis=1))
-            
-            # Visualization section
-            st.header("🗺️ Route Visualization")
-            
-            # Create interactive map
-            col5, col6 = st.columns([2, 1])
-            
-            with col5:
-                st.subheader("Route Map with Elevation Grades")
-                
-                # Create base map
-                center = [points_gdf.geometry.y.mean(), points_gdf.geometry.x.mean()]
-                m = folium.Map(location=center, zoom_start=10, tiles='CartoDB positron')
-                
-                # Color map for grades
-                colormap = cm.linear.RdYlGn_11.scale(
-                    segment_gdf['grade_pct'].min(), 
-                    segment_gdf['grade_pct'].max()
-                )
-                colormap = colormap.to_step(n=10)
-                
-                # Add segments to map
-                route_colors = {'Route 1 (Direct)': 'blue', 
-                              'Route 2 (Via Fremont)': 'red', 
-                              'Route 3 (Via Dumbarton)': 'green'}
-                
-                for _, row in segment_gdf.iterrows():
-                    color = colormap(row['grade_pct']) if not np.isnan(row['grade_pct']) else "#999999"
-                    folium.PolyLine(
-                        locations=[(pt[1], pt[0]) for pt in row['geometry'].coords],
-                        color=route_colors.get(row['route_id'], color),
-                        weight=4,
-                        tooltip=f"Route: {row['route_id']}<br>Grade: {row['grade_pct']:.2f}%",
-                        opacity=0.8
-                    ).add_to(m)
-                
-                # Add start and end markers
-                folium.Marker(
-                    [start_lat, start_lon],
-                    popup="Start",
-                    tooltip="Start",
-                    icon=folium.Icon(color='green', icon='play')
-                ).add_to(m)
-                
-                folium.Marker(
-                    [end_lat, end_lon],
-                    popup="End", 
-                    tooltip="End",
-                    icon=folium.Icon(color='red', icon='stop')
-                ).add_to(m)
-                
-                colormap.caption = "Route Segment Grade (%)"
-                colormap.add_to(m)
-                
-                folium_static(m, width=700, height=500)
-            
-            with col6:
-                st.subheader("Route Efficiency")
-                
-                # Route efficiency chart
-                fig, ax = plt.subplots(figsize=(8, 6))
-                routes = df['route_id']
-                hydrogen_kg = df['hydrogen_kg']
-                
-                colors = ['#1f77b4' if x != min(hydrogen_kg) else '#2ca02c' for x in hydrogen_kg]
-                
-                bars = ax.bar(routes, hydrogen_kg, color=colors, alpha=0.7)
-                ax.set_ylabel('Hydrogen Consumption (kg)')
-                ax.set_title('Hydrogen Efficiency by Route')
-                plt.xticks(rotation=45, ha='right')
-                
-                # Add value labels on bars
-                for bar in bars:
-                    height = bar.get_height()
-                    ax.text(bar.get_x() + bar.get_width()/2., height,
-                           f'{height:.2f} kg', ha='center', va='bottom')
-                
-                st.pyplot(fig)
-            
-            # Elevation profile
-            st.subheader("⛰️ Elevation Profiles")
-            
-            col7, col8, col9 = st.columns(3)
-            
-            for i, route in enumerate(points_gdf['route_id'].unique()):
-                route_points = points_gdf[points_gdf['route_id'] == route].sort_index()
-                
-                fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(route_points.index, route_points['elevation_m'], linewidth=2, color=['blue', 'red', 'green'][i])
-                ax.set_title(f'{route}')
-                ax.set_xlabel('Segment')
-                ax.set_ylabel('Elevation (m)')
-                ax.grid(True, alpha=0.3)
-                ax.fill_between(route_points.index, route_points['elevation_m'], alpha=0.3)
-                
-                if i == 0:
-                    with col7:
-                        st.pyplot(fig)
-                elif i == 1:
-                    with col8:
-                        st.pyplot(fig)
-                else:
-                    with col9:
-                        st.pyplot(fig)
-            
-            # Download results
-            st.subheader("📥 Export Results")
-            
-            csv = df.to_csv(index=False)
-            st.download_button(
-                label="Download Route Analysis CSV",
-                data=csv,
-                file_name="hydrogen_route_efficiency.csv",
-                mime="text/csv"
-            )
-            
-    else:
-        # Show instructions when no analysis has been run
-        st.info("""
-        ## 🚀 Get Started
+        # Metrics in columns
+        col1, col2, col3, col4 = st.columns(4)
         
-        1. **🔑 Configure API Key** - Set up your OpenRouteService API key in secrets or enter manually
-        2. **📍 Set Route Points** - Adjust start/end locations and waypoints
-        3. **⚡ Configure Efficiency** - Set hydrogen efficiency and elevation parameters  
-        4. **🚀 Analyze Routes** - Click the button to see optimized routes
-        
-        ### 💡 Pro Tip
-        For production use, add your API key to Streamlit secrets to keep it secure!
-        """)
-        
-        # Show example of what the dashboard does
-        st.header("🎯 How It Works")
-        
-        col1, col2, col3 = st.columns(3)
+        best_route = df.loc[df['hydrogen_kg'].idxmin()]
         
         with col1:
-            st.markdown("""
-            <div class="metric-card">
-                <h3>🛣️ Route Analysis</h3>
-                <p>Calculates multiple routes between your chosen points using OpenRouteService API</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric(
+                "🏆 Most Efficient Route", 
+                best_route['route_id'],
+                delta=f"✅ Saves {df['hydrogen_kg'].max() - best_route['hydrogen_kg']:.2f} kg H₂"
+            )
         
         with col2:
-            st.markdown("""
-            <div class="metric-card">
-                <h3>⛰️ Elevation Impact</h3>
-                <p>Accounts for elevation changes using Open-Elevation API to adjust fuel consumption</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric(
+                "⛽ Best Hydrogen Consumption", 
+                f"{best_route['hydrogen_kg']:.2f} kg",
+                delta=f"📈 {best_route['hydrogen_per_mile']*1000:.1f} g/mile"
+            )
         
         with col3:
-            st.markdown("""
-            <div class="metric-card">
-                <h3>⚡ Efficiency Scoring</h3>
-                <p>Ranks routes by hydrogen consumption, distance, and elevation efficiency</p>
-            </div>
-            """, unsafe_allow_html=True)
+            shortest_route = df.loc[df['distance_miles'].idxmin()]
+            st.metric(
+                "📏 Shortest Distance", 
+                f"{shortest_route['distance_miles']:.1f} miles",
+                delta=shortest_route['route_id']
+            )
+        
+        with col4:
+            min_elev_route = df.loc[df['elevation_gain_m'].idxmin()]
+            st.metric(
+                "⛰️ Least Elevation Gain", 
+                f"{min_elev_route['elevation_gain_m']:.0f} m",
+                delta=min_elev_route['route_id']
+            )
+        
+        # Detailed comparison table
+        st.subheader("📋 Detailed Route Comparison")
+        
+        display_df = df.copy()
+        display_df['distance_miles'] = display_df['distance_miles'].round(1)
+        display_df['elevation_gain_m'] = display_df['elevation_gain_m'].round(0)
+        display_df['effective_miles'] = display_df['effective_miles'].round(1)
+        display_df['hydrogen_kg'] = display_df['hydrogen_kg'].round(2)
+        display_df['hydrogen_per_mile'] = (display_df['hydrogen_per_mile'] * 1000).round(1)
+        
+        display_df = display_df.rename(columns={
+            'route_id': 'Route',
+            'distance_miles': 'Distance (miles)',
+            'elevation_gain_m': 'Elevation Gain (m)',
+            'effective_miles': 'Effective Distance (miles)',
+            'hydrogen_kg': 'Hydrogen (kg)',
+            'hydrogen_per_mile': 'Efficiency (g/mile)'
+        })
+        
+        # Style the best route
+        def highlight_best(row):
+            if row['Hydrogen (kg)'] == df['hydrogen_kg'].min():
+                return ['background-color: #d4edda'] * len(row)
+            else:
+                return [''] * len(row)
+        
+        st.dataframe(display_df.style.apply(highlight_best, axis=1))
+        
+        # Visualization section
+        st.header("🗺️ Route Visualization")
+        
+        # Create interactive map
+        col5, col6 = st.columns([2, 1])
+        
+        with col5:
+            st.subheader("Route Map with Elevation Grades")
+            
+            # Create base map
+            center = [points_gdf.geometry.y.mean(), points_gdf.geometry.x.mean()]
+            m = folium.Map(location=center, zoom_start=10, tiles='CartoDB positron')
+            
+            # Color map for grades
+            colormap = cm.linear.RdYlGn_11.scale(
+                segment_gdf['grade_pct'].min(), 
+                segment_gdf['grade_pct'].max()
+            )
+            colormap = colormap.to_step(n=10)
+            
+            # Add segments to map
+            route_colors = {'Route 1 (Direct)': 'blue', 
+                          'Route 2 (Via Fremont)': 'red', 
+                          'Route 3 (Via Dumbarton)': 'green'}
+            
+            for _, row in segment_gdf.iterrows():
+                color = colormap(row['grade_pct']) if not np.isnan(row['grade_pct']) else "#999999"
+                folium.PolyLine(
+                    locations=[(pt[1], pt[0]) for pt in row['geometry'].coords],
+                    color=route_colors.get(row['route_id'], color),
+                    weight=4,
+                    tooltip=f"Route: {row['route_id']}<br>Grade: {row['grade_pct']:.2f}%",
+                    opacity=0.8
+                ).add_to(m)
+            
+            # Add start and end markers
+            folium.Marker(
+                [start_lat, start_lon],
+                popup="Start",
+                tooltip="Start",
+                icon=folium.Icon(color='green', icon='play')
+            ).add_to(m)
+            
+            folium.Marker(
+                [end_lat, end_lon],
+                popup="End", 
+                tooltip="End",
+                icon=folium.Icon(color='red', icon='stop')
+            ).add_to(m)
+            
+            colormap.caption = "Route Segment Grade (%)"
+            colormap.add_to(m)
+            
+            folium_static(m, width=700, height=500)
+        
+        with col6:
+            st.subheader("Route Efficiency")
+            
+            # Route efficiency chart
+            fig, ax = plt.subplots(figsize=(8, 6))
+            routes = df['route_id']
+            hydrogen_kg = df['hydrogen_kg']
+            
+            colors = ['#1f77b4' if x != min(hydrogen_kg) else '#2ca02c' for x in hydrogen_kg]
+            
+            bars = ax.bar(routes, hydrogen_kg, color=colors, alpha=0.7)
+            ax.set_ylabel('Hydrogen Consumption (kg)')
+            ax.set_title('Hydrogen Efficiency by Route')
+            plt.xticks(rotation=45, ha='right')
+            
+            # Add value labels on bars
+            for bar in bars:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{height:.2f} kg', ha='center', va='bottom')
+            
+            st.pyplot(fig)
+        
+        # Elevation profile
+        st.subheader("⛰️ Elevation Profiles")
+        
+        col7, col8, col9 = st.columns(3)
+        
+        for i, route in enumerate(points_gdf['route_id'].unique()):
+            route_points = points_gdf[points_gdf['route_id'] == route].sort_index()
+            
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.plot(route_points.index, route_points['elevation_m'], linewidth=2, color=['blue', 'red', 'green'][i])
+            ax.set_title(f'{route}')
+            ax.set_xlabel('Segment')
+            ax.set_ylabel('Elevation (m)')
+            ax.grid(True, alpha=0.3)
+            ax.fill_between(route_points.index, route_points['elevation_m'], alpha=0.3)
+            
+            if i == 0:
+                with col7:
+                    st.pyplot(fig)
+            elif i == 1:
+                with col8:
+                    st.pyplot(fig)
+            else:
+                with col9:
+                    st.pyplot(fig)
+        
+        # Download results
+        st.subheader("📥 Export Results")
+        
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="Download Route Analysis CSV",
+            data=csv,
+            file_name="hydrogen_route_efficiency.csv",
+            mime="text/csv"
+        )
+        
 else:
-    st.error("""
-    ## ❌ Missing Dependencies
+    # Show instructions when no analysis has been run
+    st.info("""
+    ## 🚀 Get Started
     
-    The following required packages are not available:
-    - openrouteservice
-    - geopandas  
-    - folium
-    - branca
-    - streamlit-folium
-    - shapely
+    1. **🔑 Configure API Key** - Set up your OpenRouteService API key in secrets or enter manually
+    2. **📍 Set Route Points** - Adjust start/end locations and waypoints
+    3. **⚡ Configure Efficiency** - Set hydrogen efficiency and elevation parameters  
+    4. **🚀 Analyze Routes** - Click the button to see optimized routes
     
-    Please check your requirements.txt file and ensure all dependencies are installed.
+    ### 💡 Pro Tip
+    For production use, add your API key to Streamlit secrets to keep it secure!
     """)
+    
+    # Show example of what the dashboard does
+    st.header("🎯 How It Works")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("""
+        <div class="metric-card">
+            <h3>🛣️ Route Analysis</h3>
+            <p>Calculates multiple routes between your chosen points using OpenRouteService API</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class="metric-card">
+            <h3>⛰️ Elevation Impact</h3>
+            <p>Accounts for elevation changes using Open-Elevation API to adjust fuel consumption</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div class="metric-card">
+            <h3>⚡ Efficiency Scoring</h3>
+            <p>Ranks routes by hydrogen consumption, distance, and elevation efficiency</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 # Footer
 st.markdown("---")
