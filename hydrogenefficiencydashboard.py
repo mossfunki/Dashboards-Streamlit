@@ -14,13 +14,30 @@ import branca.colormap as cm
 from streamlit_folium import folium_static
 import os
 
-# Page configuration
 st.set_page_config(
     page_title="Hydrogen Route Efficiency Analyzer",
     page_icon="🚗",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Add meta tags for LinkedIn
+st.markdown("""
+<head>
+    <!-- Open Graph Meta Tags -->
+    <meta property="og:title" content="Hydrogen Route Efficiency Analyzer">
+    <meta property="og:description" content="Advanced route optimization for hydrogen vehicle energy consumption analysis">
+    <meta property="og:image" content="https://your-domain.com/route-analyzer-preview.png">
+    <meta property="og:url" content="https://your-streamlit-app-url.streamlit.app">
+    <meta property="og:type" content="website">
+    
+    <!-- Twitter Card Meta Tags -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Hydrogen Route Efficiency Analyzer">
+    <meta name="twitter:description" content="Advanced route optimization for hydrogen vehicle energy consumption analysis">
+    <meta name="twitter:image" content="https://your-domain.com/route-analyzer-preview.png">
+</head>
+""", unsafe_allow_html=True)
 
 # Professional CSS Styling
 st.markdown("""
