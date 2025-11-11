@@ -21,24 +21,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Add meta tags for LinkedIn
-st.markdown("""
-<head>
-    <!-- Open Graph Meta Tags -->
-    <meta property="og:title" content="Hydrogen Route Efficiency Analyzer">
-    <meta property="og:description" content="Advanced route optimization for hydrogen vehicle energy consumption analysis">
-    <meta property="og:image" content="https://your-domain.com/route-analyzer-preview.png">
-    <meta property="og:url" content="https://your-streamlit-app-url.streamlit.app">
-    <meta property="og:type" content="website">
-    
-    <!-- Twitter Card Meta Tags -->
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Hydrogen Route Efficiency Analyzer">
-    <meta name="twitter:description" content="Advanced route optimization for hydrogen vehicle energy consumption analysis">
-    <meta name="twitter:image" content="https://your-domain.com/route-analyzer-preview.png">
-</head>
-""", unsafe_allow_html=True)
-
 # Professional CSS Styling
 st.markdown("""
 <style>
@@ -140,8 +122,22 @@ st.markdown("""
     .divider {
         border-top: 1px solid #ecf0f1;
         margin: 1.5rem 0;
-    }
+    }  
 </style>
+<head>
+    <!-- Open Graph Meta Tags -->
+    <meta property="og:title" content="Hydrogen Route Efficiency Analyzer">
+    <meta property="og:description" content="Advanced route optimization for hydrogen vehicle energy consumption analysis">
+    <meta property="og:image" content="https://your-domain.com/route-analyzer-preview.png">
+    <meta property="og:url" content="https://your-streamlit-app-url.streamlit.app">
+    <meta property="og:type" content="website">
+    
+    <!-- Twitter Card Meta Tags -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Hydrogen Route Efficiency Analyzer">
+    <meta name="twitter:description" content="Advanced route optimization for hydrogen vehicle energy consumption analysis">
+    <meta name="twitter:image" content="https://your-domain.com/route-analyzer-preview.png">
+</head>
 """, unsafe_allow_html=True)
 
 # Header Section
