@@ -40,14 +40,53 @@ st.markdown("""
         margin-bottom: 2rem;
         font-size: 1.1rem;
     }
-    .section-header {
-        font-size: 1.5rem;
-        color: #2c3e50;
-        margin: 2rem 0 1rem 0;
-        font-weight: 400;
-        border-left: 4px solid #3498db;
-        padding-left: 1rem;
+    
+    /* FIXED: Proper box headers */
+    .section-container {
+        border: 1px solid #e1e8ed;
+        border-radius: 8px;
+        margin: 1.5rem 0;
+        background: white;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
+    
+    .section-header {
+        background: #f8f9fa;
+        padding: 1rem 1.5rem;
+        margin: 0;
+        font-size: 1.3rem;
+        color: #2c3e50;
+        font-weight: 500;
+        border-bottom: 1px solid #e1e8ed;
+        border-radius: 8px 8px 0 0;
+    }
+    
+    .section-content {
+        padding: 1.5rem;
+    }
+    
+    /* Nested sections for hierarchy */
+    .nested-container {
+        border: 1px solid #e1e8ed;
+        border-radius: 6px;
+        margin: 1rem 0;
+        background: white;
+    }
+    
+    .nested-header {
+        background: #f8f9fa;
+        padding: 0.75rem 1rem;
+        margin: 0;
+        font-size: 1.1rem;
+        color: #2c3e50;
+        font-weight: 500;
+        border-bottom: 1px solid #e1e8ed;
+    }
+    
+    .nested-content {
+        padding: 1rem;
+    }
+
     .metric-card {
         background: white;
         padding: 1.5rem;
@@ -70,24 +109,7 @@ st.markdown("""
         letter-spacing: 0.5px;
         margin-bottom: 0.5rem;
     }
-    .sidebar-section {
-        background: #f8f9fa;
-        padding: 1.5rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-        border-left: 4px solid #3498db;
-    }
-    .analysis-section {
-        background: #f8f9fa;
-        border-left: 4px solid #e74c3c;
-        padding: 1.5rem;
-        margin: 1.5rem 0;
-        border-radius: 0 8px 8px 0;
-    }
-    .data-table {
-        font-family: 'Courier New', monospace;
-        font-size: 0.9rem;
-    }
+    
     .success-status {
         background-color: #d4edda;
         color: #155724;
@@ -97,15 +119,7 @@ st.markdown("""
         margin: 0.5rem 0;
         border: 1px solid #c3e6cb;
     }
-    .warning-status {
-        background-color: #fff3cd;
-        color: #856404;
-        padding: 0.75rem;
-        border-radius: 6px;
-        font-size: 0.9rem;
-        margin: 0.5rem 0;
-        border: 1px solid #ffeaa7;
-    }
+    
     .divider {
         border-top: 1px solid #ecf0f1;
         margin: 1.5rem 0;
