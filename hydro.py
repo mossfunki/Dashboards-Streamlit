@@ -17,7 +17,7 @@ import os
 # Page configuration
 st.set_page_config(
     page_title="Hydrogen Route Efficiency Analyzer",
-    page_icon="🚗",
+    page_icon="https://www.v-soft.com/wp-content/uploads/2012/02/T3D.gif",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -171,7 +171,7 @@ if 'end_city' not in st.session_state:
 # Professional Sidebar Layout - CLEANED UP
 with st.sidebar:
     # Sidebar Header - SIMPLIFIED
-    st.markdown("### 🔑 API Configuration")
+    st.markdown("### API Configuration")
     
     if api_key:
         st.success("✓ API Key: Configured")
@@ -231,7 +231,7 @@ with st.sidebar:
     
     # Analysis Button
     analyze_button = st.button(
-        "🚀 Find Most Efficient Route",
+        " Find Most Efficient Route",
         type="primary",
         use_container_width=True
     )
@@ -247,8 +247,8 @@ def analyze_routes_enhanced(api_key, start, end, start_city_name, end_city_name,
         client = openrouteservice.Client(key=api_key)
         
         # Show the actual cities being analyzed
-        st.info(f"🔍 Analyzing routes from **{start_city_name}** to **{end_city_name}**")
-        st.info(f"📍 Coordinates: ({start[1]:.4f}, {start[0]:.4f}) to ({end[1]:.4f}, {end[0]:.4f})")
+        st.info(f" Analyzing routes from **{start_city_name}** to **{end_city_name}**")
+        st.info(f" Coordinates: ({start[1]:.4f}, {start[0]:.4f}) to ({end[1]:.4f}, {end[0]:.4f})")
         
         # Generate multiple route options
         route_options = []
@@ -427,7 +427,7 @@ if analyze_button and api_key:
         worst_route_row = df.loc[df['hydrogen_kg'].idxmax()]
         
         # Results Header
-        st.markdown("## 📊 Route Analysis Results")
+        st.markdown("## Route Analysis Results")
         st.markdown(f"### Recommended Route for {start_city} → {end_city}")
         
         # Highlight the best route
@@ -452,7 +452,7 @@ if analyze_button and api_key:
             st.metric("Elevation Impact", f"+{elev_impact:.1f} mi")
         
         # Detailed Comparison
-        st.markdown("### 📋 Route Comparison")
+        st.markdown("### Route Comparison")
         
         display_df = df.copy()
         display_df['Distance (mi)'] = display_df['distance_miles'].round(1)
