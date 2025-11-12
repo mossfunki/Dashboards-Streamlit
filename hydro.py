@@ -215,7 +215,7 @@ with st.sidebar:
     st.markdown("---")
     
     # Vehicle Settings - SIMPLIFIED
-    st.markdown("### ⚡ Vehicle Settings")
+    st.markdown("### Vehicle Settings")
     
     hydrogen_efficiency = st.slider(
         "Miles per kg of hydrogen", 
