@@ -193,7 +193,7 @@ with st.sidebar:
     st.markdown("---")
     
     # Journey Details - SIMPLIFIED
-    st.markdown("### 📍 Route Details")
+    st.markdown("### Route Details")
     
     # Use session state to persist city values
     start_city = st.text_input("From City", value=st.session_state.start_city, key="start_city_input")
@@ -428,7 +428,7 @@ if analyze_button and api_key:
         
         # Results Header
         st.markdown("## 📊 Route Analysis Results")
-        st.markdown(f"### 🎯 Recommended Route for {start_city} → {end_city}")
+        st.markdown(f"### Recommended Route for {start_city} → {end_city}")
         
         # Highlight the best route
         st.success(f"**Best Choice:** {best_route_row['route_id']} - Only {best_route_row['hydrogen_kg']:.2f} kg hydrogen required")
@@ -466,7 +466,7 @@ if analyze_button and api_key:
         st.dataframe(display_df, use_container_width=True)
         
         # Visualization
-        st.markdown("### 🗺️ Route Visualization")
+        st.markdown("### Route Visualization")
         
         col1, col2 = st.columns([2, 1])
         
