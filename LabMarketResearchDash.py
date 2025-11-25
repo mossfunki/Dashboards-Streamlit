@@ -11,9 +11,7 @@ import re
 # =========================
 
 def get_serpapi_key():
-    key = os.getenv("SERPAPI_KEY")
-    if not key:
-        st.error("SERPAPI_KEY environment variable is not set.")
+    key = st.secrets["SERPAPI_KEY"]
     return key
 
 # =========================
