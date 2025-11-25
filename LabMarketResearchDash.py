@@ -296,6 +296,10 @@ def main():
         "then estimate market price, demand, velocity, and a suggested max buy price."
     )
 
+# Save this run to history + show depreciation
+    history_path = append_to_history(df, model_input)
+    trend_df = load_depreciation_series(model_input)
+    
     with st.sidebar:
         st.header("Settings")
         fees = st.number_input("Estimated platform fees ($)", min_value=0.0, value=200.0, step=50.0)
@@ -377,10 +381,6 @@ def main():
         st.info("Not enough sold data to suggest a buy price.")
     else:
         st.success(f"Suggested max buy price: **${suggested:,.0f}**")
-
-    # Save this run to history + show depreciation
-    history_path = append_to_history(df, model_input)
-    trend_df = load_depreciation_series(model_input)
 
     st.subheader("Depreciation trend (median sold price over time)")
     if trend_df.empty or len(trend_df) < 2:
