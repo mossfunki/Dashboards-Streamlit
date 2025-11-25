@@ -14,6 +14,14 @@ def get_serpapi_key():
     key = st.secrets["SERPAPI_KEY"]
     return key
 
+@st.cache_data(ttl=3600)  # cache results for 1 hour
+def cached_google(query, api_key):
+    return fetch_google_shopping(query, api_key)
+
+@st.cache_data(ttl=3600)
+def cached_ebay(query, api_key):
+    return fetch_ebay_sold(query, api_key)
+
 # =========================
 # SERPAPI FETCH FUNCTIONS
 # =========================
@@ -335,8 +343,8 @@ if analyze_btn:
     with st.spinner("Fetching and analyzing data..."):
         try:
             # Fetch raw data
-            gs_raw = fetch_google_shopping(query_input, api_key)
-            ebay_raw = fetch_ebay_sold(query_input, api_key)
+            gs_raw = cached_google(query_input, api_key)
+            ebay_raw = cached_ebay(query_input, api_key)
 
             # Extract & normalize
             rows_gs = extract_from_google_shopping(gs_raw, query_input, model_input)
