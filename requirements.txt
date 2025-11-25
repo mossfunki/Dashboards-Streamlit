@@ -9,3 +9,9 @@ requests>=2.31.0
 folium>=0.14.0
 branca>=0.6.0
 streamlit-folium>=0.15.1
+pandas==2.2.1
+requests==2.31.0
+python-dotenv==1.0.1
+altair==5.2.0
+numpy==1.26.4
+
