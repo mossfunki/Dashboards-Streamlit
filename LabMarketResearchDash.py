@@ -1,9 +1,11 @@
 import os
+import time
 from datetime import datetime, timezone
 
 import requests
 import pandas as pd
 import streamlit as st
+from requests.exceptions import Timeout, RequestException
 
 # =========================
 # PAGE CONFIG
@@ -22,10 +24,10 @@ def get_serpapi_key():
     return st.secrets["SERPAPI_KEY"]
 
 # =========================
-# SERPAPI FETCH FUNCTIONS
+# IMPROVED SERPAPI FETCH FUNCTIONS
 # =========================
 
-def fetch_google_shopping(query, api_key, num=10):
+def fetch_google_shopping(query, api_key, num=10, max_retries=2):
     params = {
         "engine": "google_shopping",
         "q": query,
@@ -34,11 +36,24 @@ def fetch_google_shopping(query, api_key, num=10):
         "gl": "us",
         "num": num,
     }
-    r = requests.get("https://serpapi.com/search", params=params)
-    r.raise_for_status()
-    return r.json()
+    
+    for attempt in range(max_retries + 1):
+        try:
+            r = requests.get("https://serpapi.com/search", params=params, timeout=30)
+            r.raise_for_status()
+            return r.json()
+        except Timeout:
+            if attempt < max_retries:
+                st.warning(f"Google Shopping API timeout, retrying... ({attempt + 1}/{max_retries})")
+                time.sleep(2)
+            else:
+                st.error("Google Shopping API timeout after retries")
+                return {"shopping_results": []}
+        except RequestException as e:
+            st.error(f"Google Shopping API error: {e}")
+            return {"shopping_results": []}
 
-def fetch_ebay_sold(query, api_key, num=20, page=1):
+def fetch_ebay_sold(query, api_key, num=20, page=1, max_retries=2):
     params = {
         "engine": "ebay",
         "_nkw": query,
@@ -47,19 +62,32 @@ def fetch_ebay_sold(query, api_key, num=20, page=1):
         "page": page,
         "api_key": api_key,
     }
-    r = requests.get("https://serpapi.com/search", params=params)
-    r.raise_for_status()
-    return r.json()
+    
+    for attempt in range(max_retries + 1):
+        try:
+            r = requests.get("https://serpapi.com/search", params=params, timeout=30)
+            r.raise_for_status()
+            return r.json()
+        except Timeout:
+            if attempt < max_retries:
+                st.warning(f"eBay API timeout, retrying... ({attempt + 1}/{max_retries})")
+                time.sleep(2)
+            else:
+                st.error("eBay API timeout after retries")
+                return {"organic_results": []}
+        except RequestException as e:
+            st.error(f"eBay API error: {e}")
+            return {"organic_results": []}
 
 # =========================
-# CACHING WRAPPERS
+# IMPROVED CACHING WITH SHORTER TTL
 # =========================
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=1800)  # 30 minutes instead of 1 hour
 def cached_google(query, api_key):
     return fetch_google_shopping(query, api_key)
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=1800)
 def cached_ebay(query, api_key):
     return fetch_ebay_sold(query, api_key)
 
@@ -221,14 +249,14 @@ def suggested_buy_price(median_sold_price, fees, refurb_cost, target_profit):
     return median_sold_price - fees - refurb_cost - target_profit
 
 # =========================
-# MAIN APP
+# IMPROVED MAIN APP
 # =========================
 
 def main():
     st.title("🧪 Machine Market Analyzer")
 
     st.markdown(
-        "Type a machine / model name and I’ll fetch recent listings + sold data, "
+        "Type a machine / model name and I'll fetch recent listings + sold data, "
         "then estimate market price, demand, velocity, and a suggested max buy price."
     )
 
@@ -238,6 +266,11 @@ def main():
         refurb_cost = st.number_input("Estimated refurb cost ($)", min_value=0.0, value=100.0, step=50.0)
         target_profit = st.number_input("Target profit per unit ($)", min_value=0.0, value=300.0, step=50.0)
         min_sold_for_demand = st.number_input("Min sold for 'Medium' demand", min_value=1, value=3, step=1)
+        
+        # Add a cache control option
+        if st.button("Clear Cache"):
+            st.cache_data.clear()
+            st.success("Cache cleared!")
 
     model_input = st.text_input("Machine / model to analyze", value="Eppendorf 5415R")
     query_input = st.text_input(
@@ -251,26 +284,47 @@ def main():
         st.caption("Set your parameters and click **Analyze market** to fetch data.")
         return
 
+    # Input validation
+    if not query_input.strip():
+        st.warning("Please enter a search query")
+        return
+
     api_key = get_serpapi_key()
     if not api_key:
         st.stop()
 
-    with st.spinner("Fetching and analyzing data..."):
-        try:
-            gs_raw = cached_google(query_input, api_key)
-            ebay_raw = cached_ebay(query_input, api_key)
+    # Use progress bars for better UX
+    progress_bar = st.progress(0)
+    status_text = st.empty()
 
-            rows_gs = extract_from_google_shopping(gs_raw, query_input, model_input)
-            rows_ebay = extract_from_ebay_sold(ebay_raw, query_input, model_input)
-            all_rows = normalize_rows(rows_gs + rows_ebay)
+    try:
+        status_text.text("Fetching Google Shopping data...")
+        gs_raw = cached_google(query_input, api_key)
+        progress_bar.progress(33)
 
-            df = pd.DataFrame(all_rows)
-        except requests.HTTPError as e:
-            st.error(f"HTTP error: {e}")
-            st.stop()
-        except Exception as e:
-            st.error(f"Unexpected error: {e}")
-            st.stop()
+        status_text.text("Fetching eBay sold data...")
+        ebay_raw = cached_ebay(query_input, api_key)
+        progress_bar.progress(66)
+
+        status_text.text("Processing data...")
+        rows_gs = extract_from_google_shopping(gs_raw, query_input, model_input)
+        rows_ebay = extract_from_ebay_sold(ebay_raw, query_input, model_input)
+        all_rows = normalize_rows(rows_gs + rows_ebay)
+
+        df = pd.DataFrame(all_rows)
+        progress_bar.progress(100)
+        status_text.text("Complete!")
+        
+        # Small delay to show completion
+        time.sleep(0.5)
+        progress_bar.empty()
+        status_text.empty()
+
+    except Exception as e:
+        progress_bar.empty()
+        status_text.empty()
+        st.error(f"Unexpected error: {e}")
+        st.stop()
 
     if df.empty:
         st.warning("No data found for this query. Try adjusting the search term.")
