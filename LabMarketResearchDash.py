@@ -1,5 +1,4 @@
 import os
-import re
 from datetime import datetime, timezone
 
 import requests
@@ -40,14 +39,11 @@ def fetch_google_shopping(query, api_key, num=10):
     return r.json()
 
 def fetch_ebay_sold(query, api_key, num=20, page=1):
-    """
-    Fetch sold items from eBay via SerpAPI.
-    """
     params = {
         "engine": "ebay",
-        "_nkw": query,          # eBay search term
+        "_nkw": query,
         "ebay_domain": "ebay.com",
-        "show_only": "Sold",    # only sold listings
+        "show_only": "Sold",
         "page": page,
         "api_key": api_key,
     }
@@ -59,7 +55,7 @@ def fetch_ebay_sold(query, api_key, num=20, page=1):
 # CACHING WRAPPERS
 # =========================
 
-@st.cache_data(ttl=3600)  # cache results for 1 hour
+@st.cache_data(ttl=3600)
 def cached_google(query, api_key):
     return fetch_google_shopping(query, api_key)
 
@@ -81,7 +77,7 @@ def extract_from_google_shopping(raw, query, model):
             "model": model,
             "title": item.get("title"),
             "price_raw": item.get("extracted_price") or item.get("price"),
-            "currency": "USD",  # assume US for now
+            "currency": "USD",
             "condition_raw": item.get("condition"),
             "url": item.get("link"),
             "seller": item.get("source"),
@@ -123,7 +119,6 @@ def parse_price(price_raw):
         return float(price_raw)
 
     text = str(price_raw)
-    # examples: "$1,250.00", "US $800.00", "$1,550"
     for ch in ["$", "€", "£", ","]:
         text = text.replace(ch, "")
     text = text.strip().split()[0]
@@ -155,9 +150,6 @@ def normalize_rows(rows):
 # =========================
 
 def compute_insights(df, min_sold_for_demand=3):
-    """
-    Returns a dict of high-level insights including demand + velocity.
-    """
     if df.empty:
         return {}
 
@@ -188,7 +180,7 @@ def compute_insights(df, min_sold_for_demand=3):
         insights["active_count"] = 0
         insights["avg_active_price"] = None
 
-    # Demand label (simple)
+    # Demand label
     sold_count = insights["sold_count"]
     if sold_count == 0:
         demand_label = "Very low / unknown"
@@ -200,9 +192,9 @@ def compute_insights(df, min_sold_for_demand=3):
         demand_label = "High"
 
     insights["demand_label"] = demand_label
-    insights["demand_score"] = sold_count  # raw count as simple score
+    insights["demand_score"] = sold_count
 
-    # Velocity / "time on market" style signal
+    # Velocity
     total_with_price = insights["sold_count"] + insights["active_count"]
     if total_with_price > 0:
         sell_through_rate = insights["sold_count"] / total_with_price
@@ -229,62 +221,6 @@ def suggested_buy_price(median_sold_price, fees, refurb_cost, target_profit):
     return median_sold_price - fees - refurb_cost - target_profit
 
 # =========================
-# HISTORY / DEPRECIATION
-# =========================
-
-def model_to_slug(model: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9]+", "_", model).strip("_").lower()
-    return slug or "model"
-
-def append_to_history(df: pd.DataFrame, model: str) -> str:
-    os.makedirs("data/history", exist_ok=True)
-
-    slug = model_to_slug(model)
-    path = f"data/history/{slug}.csv"
-
-    to_save = df.copy()
-
-    if os.path.exists(path):
-        old = pd.read_csv(path)
-        combined = pd.concat([old, to_save], ignore_index=True)
-    else:
-        combined = to_save
-
-    combined.to_csv(path, index=False)
-    return path
-
-def load_depreciation_series(model: str) -> pd.DataFrame:
-    slug = model_to_slug(model)
-    path = f"data/history/{slug}.csv"
-    if not os.path.exists(path):
-        return pd.DataFrame()
-
-    hist = pd.read_csv(path)
-
-    if "price" not in hist.columns or "is_sold" not in hist.columns:
-        return pd.DataFrame()
-
-    hist = hist[hist["is_sold"] & hist["price"].notna()].copy()
-    if hist.empty:
-        return hist
-
-    if "sold_date" in hist.columns and hist["sold_date"].notna().any():
-        hist["trade_date"] = pd.to_datetime(
-            hist["sold_date"].fillna(hist["scrape_datetime"])
-        )
-    else:
-        hist["trade_date"] = pd.to_datetime(hist["scrape_datetime"])
-
-    hist["trade_date"] = hist["trade_date"].dt.date
-    series = (
-        hist.groupby("trade_date")["price"]
-        .median()
-        .reset_index()
-        .sort_values("trade_date")
-    )
-    return series
-
-# =========================
 # MAIN APP
 # =========================
 
@@ -296,10 +232,6 @@ def main():
         "then estimate market price, demand, velocity, and a suggested max buy price."
     )
 
-# Save this run to history + show depreciation
-    history_path = append_to_history(df, model_input)
-    trend_df = load_depreciation_series(model_input)
-    
     with st.sidebar:
         st.header("Settings")
         fees = st.number_input("Estimated platform fees ($)", min_value=0.0, value=200.0, step=50.0)
@@ -344,7 +276,6 @@ def main():
         st.warning("No data found for this query. Try adjusting the search term.")
         return
 
-    # High-level insights
     insights = compute_insights(df, min_sold_for_demand=min_sold_for_demand)
 
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -368,7 +299,6 @@ def main():
         "Higher sell-through usually means items don't sit long on the market."
     )
 
-    # Suggested max buy price
     suggested = suggested_buy_price(
         insights.get("median_sold_price"),
         fees=fees,
@@ -382,24 +312,12 @@ def main():
     else:
         st.success(f"Suggested max buy price: **${suggested:,.0f}**")
 
-    st.subheader("Depreciation trend (median sold price over time)")
-    if trend_df.empty or len(trend_df) < 2:
-        st.info(
-            "Not enough historical data yet to show a depreciation trend. "
-            "Keep using this tool over time and the chart will fill in."
-        )
-    else:
-        trend_df = trend_df.set_index("trade_date")
-        st.line_chart(trend_df["price"])
-
-    # Charts
     st.subheader("Price distribution (sold vs active)")
     chart_df = df[df["price"].notna()].copy()
     if not chart_df.empty:
         chart_df["type"] = chart_df["is_sold"].map({True: "Sold", False: "Active"})
         st.bar_chart(chart_df.groupby("type")["price"].mean())
 
-    # Detailed table
     st.subheader("Raw listings")
     display_cols = ["source", "is_sold", "price", "condition", "title", "seller", "url"]
     st.dataframe(df[display_cols])
@@ -407,4 +325,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
