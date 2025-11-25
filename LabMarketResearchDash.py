@@ -1,32 +1,32 @@
 import os
+import re
 from datetime import datetime, timezone
 
 import requests
 import pandas as pd
 import streamlit as st
-import re
 
 # =========================
-# CONFIG
+# PAGE CONFIG
+# =========================
+
+st.set_page_config(page_title="Machine Market Analyzer", layout="wide")
+
+# =========================
+# CONFIG / SECRETS
 # =========================
 
 def get_serpapi_key():
-    key = st.secrets["SERPAPI_KEY"]
-    return key
-
-@st.cache_data(ttl=3600)  # cache results for 1 hour
-def cached_google(query, api_key):
-    return fetch_google_shopping(query, api_key)
-
-@st.cache_data(ttl=3600)
-def cached_ebay(query, api_key):
-    return fetch_ebay_sold(query, api_key)
+    if "SERPAPI_KEY" not in st.secrets:
+        st.error("SERPAPI_KEY is missing from Streamlit secrets!")
+        st.stop()
+    return st.secrets["SERPAPI_KEY"]
 
 # =========================
 # SERPAPI FETCH FUNCTIONS
 # =========================
 
-def fetch_google_shopping(query, api_key, num=20):
+def fetch_google_shopping(query, api_key, num=10):
     params = {
         "engine": "google_shopping",
         "q": query,
@@ -39,7 +39,7 @@ def fetch_google_shopping(query, api_key, num=20):
     r.raise_for_status()
     return r.json()
 
-def fetch_ebay_sold(query, api_key, num=50, page=1):
+def fetch_ebay_sold(query, api_key, num=20, page=1):
     """
     Fetch sold items from eBay via SerpAPI.
     """
@@ -54,6 +54,18 @@ def fetch_ebay_sold(query, api_key, num=50, page=1):
     r = requests.get("https://serpapi.com/search", params=params)
     r.raise_for_status()
     return r.json()
+
+# =========================
+# CACHING WRAPPERS
+# =========================
+
+@st.cache_data(ttl=3600)  # cache results for 1 hour
+def cached_google(query, api_key):
+    return fetch_google_shopping(query, api_key)
+
+@st.cache_data(ttl=3600)
+def cached_ebay(query, api_key):
+    return fetch_ebay_sold(query, api_key)
 
 # =========================
 # EXTRACT FUNCTIONS
@@ -96,7 +108,7 @@ def extract_from_ebay_sold(raw, query, model):
             "seller": item.get("source"),
             "marketplace": "ebay",
             "is_sold": True,
-            "location": None,
+            "location": item.get("location"),
         })
     return rows
 
@@ -114,7 +126,6 @@ def parse_price(price_raw):
     # examples: "$1,250.00", "US $800.00", "$1,550"
     for ch in ["$", "€", "£", ","]:
         text = text.replace(ch, "")
-    # split off things like "US " or " to "
     text = text.strip().split()[0]
     try:
         return float(text)
@@ -154,7 +165,7 @@ def compute_insights(df, min_sold_for_demand=3):
     active = df[~df["is_sold"] & df["price"].notna()]
 
     insights = {}
-# =========================
+
     # Price stats (sold listings only)
     if not sold.empty:
         insights["sold_count"] = len(sold)
@@ -176,7 +187,7 @@ def compute_insights(df, min_sold_for_demand=3):
     else:
         insights["active_count"] = 0
         insights["avg_active_price"] = None
-# =========================
+
     # Demand label (simple)
     sold_count = insights["sold_count"]
     if sold_count == 0:
@@ -211,18 +222,26 @@ def compute_insights(df, min_sold_for_demand=3):
     insights["velocity_label"] = velocity_label
 
     return insights
+
+def suggested_buy_price(median_sold_price, fees, refurb_cost, target_profit):
+    if median_sold_price is None:
+        return None
+    return median_sold_price - fees - refurb_cost - target_profit
+
 # =========================
+# HISTORY / DEPRECIATION
+# =========================
+
 def model_to_slug(model: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9]+", "_", model).strip("_").lower()
     return slug or "model"
-# =========================
+
 def append_to_history(df: pd.DataFrame, model: str) -> str:
     os.makedirs("data/history", exist_ok=True)
 
     slug = model_to_slug(model)
     path = f"data/history/{slug}.csv"
 
-    # Don't mutate the original df
     to_save = df.copy()
 
     if os.path.exists(path):
@@ -233,7 +252,7 @@ def append_to_history(df: pd.DataFrame, model: str) -> str:
 
     combined.to_csv(path, index=False)
     return path
-# =========================
+
 def load_depreciation_series(model: str) -> pd.DataFrame:
     slug = model_to_slug(model)
     path = f"data/history/{slug}.csv"
@@ -249,7 +268,6 @@ def load_depreciation_series(model: str) -> pd.DataFrame:
     if hist.empty:
         return hist
 
-    # Use sold_date if you later add it, else fallback to scrape_datetime
     if "sold_date" in hist.columns and hist["sold_date"].notna().any():
         hist["trade_date"] = pd.to_datetime(
             hist["sold_date"].fillna(hist["scrape_datetime"])
@@ -267,92 +285,50 @@ def load_depreciation_series(model: str) -> pd.DataFrame:
     return series
 
 # =========================
-# Save this run to history (for depreciation over time)
-history_path = append_to_history(df, model_input)
+# MAIN APP
+# =========================
 
-trend_df = load_depreciation_series(model_input)
+def main():
+    st.title("🧪 Machine Market Analyzer")
 
-st.subheader("Depreciation trend (median sold price over time)")
-if trend_df.empty or len(trend_df) < 2:
-    st.info(
-        "Not enough historical data yet to show a depreciation trend. "
-        "Keep using this tool over time and the chart will fill in."
+    st.markdown(
+        "Type a machine / model name and I’ll fetch recent listings + sold data, "
+        "then estimate market price, demand, velocity, and a suggested max buy price."
     )
-else:
-    trend_df = trend_df.set_index("trade_date")
-    st.line_chart(trend_df["price"])
 
-# =========================
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("Sold listings (sample)", insights.get("sold_count", 0))
-with col2:
-    median_price = insights.get("median_sold_price")
-    st.metric(
-        "Median sold price",
-        f"${median_price:,.0f}" if median_price else "N/A",
+    with st.sidebar:
+        st.header("Settings")
+        fees = st.number_input("Estimated platform fees ($)", min_value=0.0, value=200.0, step=50.0)
+        refurb_cost = st.number_input("Estimated refurb cost ($)", min_value=0.0, value=100.0, step=50.0)
+        target_profit = st.number_input("Target profit per unit ($)", min_value=0.0, value=300.0, step=50.0)
+        min_sold_for_demand = st.number_input("Min sold for 'Medium' demand", min_value=1, value=3, step=1)
+
+    model_input = st.text_input("Machine / model to analyze", value="Eppendorf 5415R")
+    query_input = st.text_input(
+        "Search query (used for Google/eBay; you can tweak it)",
+        value="Eppendorf 5415R centrifuge"
     )
-with col3:
-    st.metric("Active listings (sample)", insights.get("active_count", 0))
-with col4:
-    st.metric("Market velocity", insights.get("velocity_label", "Unknown"))
 
-def suggested_buy_price(median_sold_price, fees, refurb_cost, target_profit):
-    if median_sold_price is None:
-        return None
-    return median_sold_price - fees - refurb_cost - target_profit
+    analyze_btn = st.button("Analyze market")
 
-st.caption(
-    "Velocity is based on the ratio of sold vs active listings in this sample. "
-    "Higher sell-through usually means items don't sit long on the market."
-)
+    if not analyze_btn:
+        st.caption("Set your parameters and click **Analyze market** to fetch data.")
+        return
 
-# =========================
-# STREAMLIT APP
-# =========================
-
-st.set_page_config(page_title="Machine Market Analyzer", layout="wide")
-
-st.title("🧪 Machine Market Analyzer")
-
-st.markdown(
-    "Type a machine / model name and I’ll fetch recent listings + sold data, "
-    "then estimate market price, demand, and a suggested max buy price."
-)
-
-with st.sidebar:
-    st.header("Settings")
-    fees = st.number_input("Estimated platform fees ($)", min_value=0.0, value=200.0, step=50.0)
-    refurb_cost = st.number_input("Estimated refurb cost ($)", min_value=0.0, value=100.0, step=50.0)
-    target_profit = st.number_input("Target profit per unit ($)", min_value=0.0, value=300.0, step=50.0)
-    min_sold_for_demand = st.number_input("Min sold for 'Medium' demand", min_value=1, value=3, step=1)
-
-model_input = st.text_input("Machine / model to analyze", value="Eppendorf 5415R")
-query_input = st.text_input(
-    "Search query (used for Google/eBay; you can tweak it)",
-    value="Eppendorf 5415R centrifuge"
-)
-
-analyze_btn = st.button("Analyze market")
-
-if analyze_btn:
     api_key = get_serpapi_key()
     if not api_key:
         st.stop()
 
     with st.spinner("Fetching and analyzing data..."):
         try:
-            # Fetch raw data
             gs_raw = cached_google(query_input, api_key)
             ebay_raw = cached_ebay(query_input, api_key)
 
-            # Extract & normalize
             rows_gs = extract_from_google_shopping(gs_raw, query_input, model_input)
             rows_ebay = extract_from_ebay_sold(ebay_raw, query_input, model_input)
             all_rows = normalize_rows(rows_gs + rows_ebay)
 
             df = pd.DataFrame(all_rows)
-
         except requests.HTTPError as e:
             st.error(f"HTTP error: {e}")
             st.stop()
@@ -362,49 +338,73 @@ if analyze_btn:
 
     if df.empty:
         st.warning("No data found for this query. Try adjusting the search term.")
-    else:
-        # High-level insights
-        insights = compute_insights(df, min_sold_for_demand=min_sold_for_demand)
+        return
 
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Sold listings (sample)", insights.get("sold_count", 0))
-        with col2:
-            median_price = insights.get("median_sold_price")
-            st.metric(
-                "Median sold price",
-                f"${median_price:,.0f}" if median_price else "N/A",
-            )
-        with col3:
-            st.metric("Active listings (sample)", insights.get("active_count", 0))
-        with col4:
-            st.metric("Demand", insights.get("demand_label", "Unknown"))
+    # High-level insights
+    insights = compute_insights(df, min_sold_for_demand=min_sold_for_demand)
 
-        # Suggested max buy price
-        suggested = suggested_buy_price(
-            insights.get("median_sold_price"),
-            fees=fees,
-            refurb_cost=refurb_cost,
-            target_profit=target_profit,
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("Sold listings (sample)", insights.get("sold_count", 0))
+    with col2:
+        median_price = insights.get("median_sold_price")
+        st.metric(
+            "Median sold price",
+            f"${median_price:,.0f}" if median_price else "N/A",
         )
+    with col3:
+        st.metric("Active listings (sample)", insights.get("active_count", 0))
+    with col4:
+        st.metric("Demand", insights.get("demand_label", "Unknown"))
+    with col5:
+        st.metric("Market velocity", insights.get("velocity_label", "Unknown"))
 
-        st.subheader("Suggested max buy price")
-        if suggested is None:
-            st.info("Not enough sold data to suggest a buy price.")
-        else:
-            st.success(f"Suggested max buy price: **${suggested:,.0f}**")
+    st.caption(
+        "Velocity is based on the ratio of sold vs active listings in this sample. "
+        "Higher sell-through usually means items don't sit long on the market."
+    )
 
-        # Charts
-        st.subheader("Price distribution (sold vs active)")
+    # Suggested max buy price
+    suggested = suggested_buy_price(
+        insights.get("median_sold_price"),
+        fees=fees,
+        refurb_cost=refurb_cost,
+        target_profit=target_profit,
+    )
 
-        chart_df = df[df["price"].notna()].copy()
-        if not chart_df.empty:
-            chart_df["type"] = chart_df["is_sold"].map({True: "Sold", False: "Active"})
-            st.bar_chart(
-                chart_df.groupby("type")["price"].mean()
-            )
+    st.subheader("Suggested max buy price")
+    if suggested is None:
+        st.info("Not enough sold data to suggest a buy price.")
+    else:
+        st.success(f"Suggested max buy price: **${suggested:,.0f}**")
 
-        # Detailed table
-        st.subheader("Raw listings")
-        display_cols = ["source", "is_sold", "price", "condition", "title", "seller", "url"]
-        st.dataframe(df[display_cols])
+    # Save this run to history + show depreciation
+    history_path = append_to_history(df, model_input)
+    trend_df = load_depreciation_series(model_input)
+
+    st.subheader("Depreciation trend (median sold price over time)")
+    if trend_df.empty or len(trend_df) < 2:
+        st.info(
+            "Not enough historical data yet to show a depreciation trend. "
+            "Keep using this tool over time and the chart will fill in."
+        )
+    else:
+        trend_df = trend_df.set_index("trade_date")
+        st.line_chart(trend_df["price"])
+
+    # Charts
+    st.subheader("Price distribution (sold vs active)")
+    chart_df = df[df["price"].notna()].copy()
+    if not chart_df.empty:
+        chart_df["type"] = chart_df["is_sold"].map({True: "Sold", False: "Active"})
+        st.bar_chart(chart_df.groupby("type")["price"].mean())
+
+    # Detailed table
+    st.subheader("Raw listings")
+    display_cols = ["source", "is_sold", "price", "condition", "title", "seller", "url"]
+    st.dataframe(df[display_cols])
+
+
+if __name__ == "__main__":
+    main()
+
