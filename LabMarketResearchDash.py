@@ -9,6 +9,9 @@ from requests.exceptions import Timeout, RequestException
 import plotly.express as px
 import plotly.graph_objects as go
 from scipy import stats
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import json
 
 # =========================
 # PAGE CONFIG
@@ -30,7 +33,75 @@ if not st.session_state.initialized:
     st.rerun()
 
 # =========================
-# ENHANCED DATA SOURCES
+# ENHANCED PRODUCT DATABASE WITH ML IDENTIFICATION
+# =========================
+
+class ProductIdentifier:
+    def __init__(self):
+        self.common_machines = {
+            'centrifuges': [
+                'eppendorf 5415r', 'eppendorf 5424r', 'eppendorf 5804r', 'eppendorf 5430r',
+                'beckman coulter allegra x-15r', 'beckman coulter avanti j-26 xp', 'beckman coulter optima xpn',
+                'thermo scientific sorvall st 8', 'thermo scientific legend x1r', 'thermo scientific megafuge 16',
+                'sigma 3-18k', 'sigma 2-16kl', 'sigma 1-14',
+                'harrier 18/80', 'microstar 12', 'multifuge x3r'
+            ],
+            'microscopes': [
+                'nikon eclipse ts2', 'nikon eclipse ti2', 'nikon eclipse 80i',
+                'olympus bx53', 'olympus cx33', 'olympus ix83',
+                'leica dm6 b', 'leica dm750', 'leica sp8',
+                'zeiss axio observer', 'zeiss primostar', 'zeiss stemi 508'
+            ],
+            'analyzers': [
+                'agilent 8890 gc', 'agilent 1260 hplc', 'agilent 6545 lc/ms',
+                'waters acquity uplc', 'waters arc hplc', 'waters xevo tq-xs',
+                'shimadzu gc-2030', 'shimadzu lc-2030', 'shimadzu irtracer-100',
+                'perkinelmer clarus 580', 'perkinelmer flexar', 'perkinelmer frontier'
+            ],
+            'spectrometers': [
+                'thermo scientific q exactive', 'thermo scientific isq ec', 'thermo scientific nicolet is5',
+                'agilent 5977b gc/msd', 'agilent 4210 tape', 'agilent cary 3500',
+                'bruker amazon sl', 'bruker tensor ii', 'bruker alfa ii'
+            ]
+        }
+        
+        # Build product database
+        self.products = []
+        for category, machines in self.common_machines.items():
+            for machine in machines:
+                self.products.append({
+                    'name': machine,
+                    'category': category,
+                    'brand': machine.split()[0],
+                    'model': ' '.join(machine.split()[1:])
+                })
+        
+        # Prepare ML features
+        self.vectorizer = TfidfVectorizer(analyzer='char', ngram_range=(2, 4))
+        self.product_names = [p['name'] for p in self.products]
+        if self.product_names:
+            self.tfidf_matrix = self.vectorizer.fit_transform(self.product_names)
+    
+    def identify_product(self, search_query):
+        """Use ML to identify the most likely product from search query"""
+        if not self.product_names:
+            return None, 0.0
+        
+        # Transform query
+        query_vec = self.vectorizer.transform([search_query.lower()])
+        
+        # Calculate similarities
+        similarities = cosine_similarity(query_vec, self.tfidf_matrix).flatten()
+        
+        # Get best match
+        best_idx = np.argmax(similarities)
+        best_similarity = similarities[best_idx]
+        best_product = self.products[best_idx]
+        
+        return best_product, best_similarity
+
+# =========================
+# ENHANCED DATA SOURCES WITH BETTER PRICE EXTRACTION AND FILTERING
 # =========================
 
 def get_serpapi_key():
@@ -39,13 +110,86 @@ def get_serpapi_key():
         st.stop()
     return st.secrets["SERPAPI_KEY"]
 
-def fetch_ebay_sold_comprehensive(query, api_key, pages=3):
-    """Fetch multiple pages of eBay sold data for better market representation"""
+def create_precise_query(base_query, exact_model):
+    """Create precise search query with exclusions and exact matching"""
+    # Clean the base query
+    base_clean = re.sub(r'[^\w\s]', ' ', base_query).strip()
+    
+    # Build precise query with exclusions
+    exclusions = ['parts', 'accessory', 'manual', 'broken', 'repair', 'for parts', 'empty']
+    exact_phrase = f'"{exact_model}"' if exact_model else f'"{base_clean}"'
+    
+    exclusion_str = ' '.join([f'-{term}' for term in exclusions])
+    precise_query = f'{exact_phrase} {exclusion_str}'.strip()
+    
+    return precise_query
+
+def extract_price_robust(item):
+    """Robust price extraction from multiple possible fields"""
+    # Try multiple price fields in order of reliability
+    price_fields = ['extracted_price', 'current_price', 'price', 'converted_price']
+    
+    for field in price_fields:
+        price = item.get(field)
+        if price is not None:
+            if isinstance(price, (int, float)):
+                return float(price)
+            elif isinstance(price, str):
+                # Clean and parse string price
+                clean_price = re.sub(r'[^\d.]', '', price)
+                if clean_price:
+                    try:
+                        return float(clean_price)
+                    except ValueError:
+                        continue
+    
+    # Fallback: extract from title using regex
+    title = item.get('title', '')
+    price_matches = re.findall(r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', title)
+    if price_matches:
+        try:
+            # Take the first price found and clean it
+            price_str = price_matches[0].replace(',', '')
+            return float(price_str)
+        except ValueError:
+            pass
+    
+    return None
+
+def is_relevant_listing(title, target_model, target_brand):
+    """Determine if listing is relevant to our target product"""
+    if not title:
+        return False
+    
+    title_lower = title.lower()
+    
+    # Must contain brand
+    if target_brand.lower() not in title_lower:
+        return False
+    
+    # Must contain model number (exact match preferred)
+    model_pattern = rf'\b{re.escape(target_model.lower())}\b'
+    if re.search(model_pattern, title_lower):
+        return True
+    
+    # Check for partial model matches with high confidence
+    if any(term in title_lower for term in [target_model.lower(), target_model.split()[0].lower()]):
+        # But exclude obvious mismatches
+        exclusion_terms = ['parts', 'accessory', 'broken', 'repair', 'manual only']
+        if not any(excl in title_lower for excl in exclusion_terms):
+            return True
+    
+    return False
+
+def fetch_ebay_sold_comprehensive(query, api_key, target_model, target_brand, pages=3):
+    """Fetch sold data with precise filtering"""
     all_results = []
+    precise_query = create_precise_query(query, target_model)
+    
     for page in range(1, pages + 1):
         params = {
             "engine": "ebay",
-            "_nkw": query,
+            "_nkw": precise_query,
             "ebay_domain": "ebay.com",
             "show_only": "Sold",
             "page": page,
@@ -55,163 +199,116 @@ def fetch_ebay_sold_comprehensive(query, api_key, pages=3):
             r = requests.get("https://serpapi.com/search", params=params, timeout=30)
             r.raise_for_status()
             data = r.json()
-            all_results.extend(data.get("organic_results", []))
-            # Small delay to be respectful to API
-            time.sleep(1)
+            
+            # Filter for relevant listings only
+            relevant_items = []
+            for item in data.get("organic_results", []):
+                if is_relevant_listing(item.get('title'), target_model, target_brand):
+                    # Extract price robustly
+                    item['extracted_price'] = extract_price_robust(item)
+                    relevant_items.append(item)
+            
+            all_results.extend(relevant_items)
+            time.sleep(1)  # Rate limiting
         except Exception as e:
-            st.warning(f"Failed to fetch page {page}: {e}")
+            st.warning(f"Failed to fetch sold page {page}: {e}")
             continue
+    
     return {"organic_results": all_results}
 
-def fetch_ebay_completed(query, api_key):
-    """Fetch completed listings (both sold and unsold) for price ceiling analysis"""
-    params = {
-        "engine": "ebay",
-        "_nkw": query,
-        "ebay_domain": "ebay.com",
-        "show_only": "Completed",  # This includes both sold and unsold
-        "api_key": api_key,
-    }
-    try:
-        r = requests.get("https://serpapi.com/search", params=params, timeout=30)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        st.warning(f"Failed to fetch completed listings: {e}")
-        return {"organic_results": []}
+def fetch_ebay_active(query, api_key, target_model, target_brand, pages=2):
+    """Fetch active listings with precise filtering"""
+    all_results = []
+    precise_query = create_precise_query(query, target_model)
+    
+    for page in range(1, pages + 1):
+        params = {
+            "engine": "ebay",
+            "_nkw": precise_query,
+            "ebay_domain": "ebay.com",
+            "page": page,
+            "api_key": api_key,
+        }
+        try:
+            r = requests.get("https://serpapi.com/search", params=params, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            
+            # Filter for relevant listings only
+            relevant_items = []
+            for item in data.get("organic_results", []):
+                if is_relevant_listing(item.get('title'), target_model, target_brand):
+                    # Extract price robustly
+                    item['extracted_price'] = extract_price_robust(item)
+                    relevant_items.append(item)
+            
+            all_results.extend(relevant_items)
+            time.sleep(1)
+        except Exception as e:
+            st.warning(f"Failed to fetch active page {page}: {e}")
+            continue
+    
+    return {"organic_results": all_results}
 
 # =========================
 # ENHANCED CACHING
 # =========================
 
 @st.cache_data(ttl=1800)
-def cached_ebay_comprehensive(query, api_key):
-    return fetch_ebay_sold_comprehensive(query, api_key)
+def cached_ebay_sold(query, api_key, target_model, target_brand):
+    return fetch_ebay_sold_comprehensive(query, api_key, target_model, target_brand)
 
 @st.cache_data(ttl=1800)
-def cached_ebay_completed(query, api_key):
-    return fetch_ebay_completed(query, api_key)
-
-@st.cache_data(ttl=1800)
-def cached_google(query, api_key):
-    params = {
-        "engine": "google_shopping",
-        "q": query,
-        "api_key": api_key,
-        "hl": "en",
-        "gl": "us",
-        "num": 20,
-    }
-    try:
-        r = requests.get("https://serpapi.com/search", params=params, timeout=30)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        st.warning(f"Google Shopping API error: {e}")
-        return {"shopping_results": []}
+def cached_ebay_active(query, api_key, target_model, target_brand):
+    return fetch_ebay_active(query, api_key, target_model, target_brand)
 
 # =========================
 # ENHANCED DATA EXTRACTION
 # =========================
 
-def extract_ebay_sold_with_metrics(raw, query, model):
-    """Extract sold items with additional metrics for analysis"""
+def extract_ebay_sold_with_metrics(raw, query, model, brand):
+    """Extract sold items with enhanced metrics"""
     rows = []
     for item in raw.get("organic_results", []):
-        price_text = item.get("price") or item.get("extracted_price")
-        
-        # Extract bid count if available
-        bid_count = None
-        title = item.get("title", "")
-        if "bid" in title.lower():
-            bid_match = re.search(r'(\d+)\s*bid', title.lower())
-            if bid_match:
-                bid_count = int(bid_match.group(1))
+        price = item.get("extracted_price")
         
         rows.append({
             "scrape_datetime": datetime.now(timezone.utc).isoformat(),
             "source": "ebay_sold",
             "query": query,
             "model": model,
-            "title": title,
-            "price_raw": price_text,
+            "brand": brand,
+            "title": item.get("title", ""),
+            "price_raw": price,
             "condition_raw": item.get("condition"),
             "seller": item.get("source"),
             "is_sold": True,
-            "bid_count": bid_count,
-            "has_bids": bid_count is not None and bid_count > 0,
-            "is_auction": "bid" in title.lower() or bid_count is not None,
+            "is_active": False,
+            "has_bids": "bid" in item.get('title', '').lower(),
         })
     return rows
 
-def extract_ebay_completed_listings(raw, query, model):
-    """Extract both sold and unsold completed listings"""
+def extract_ebay_active_listings(raw, query, model, brand):
+    """Extract active listings"""
     rows = []
     for item in raw.get("organic_results", []):
-        price_text = item.get("price") or item.get("extracted_price")
-        
-        # Determine if item sold (eBay usually indicates this)
-        is_sold = False
-        title = item.get("title", "").lower()
-        if "sold" in title or "sale" in title:
-            is_sold = True
+        price = item.get("extracted_price")
         
         rows.append({
             "scrape_datetime": datetime.now(timezone.utc).isoformat(),
-            "source": "ebay_completed",
+            "source": "ebay_active",
             "query": query,
             "model": model,
-            "title": item.get("title"),
-            "price_raw": price_text,
-            "condition_raw": item.get("condition"),
-            "is_sold": is_sold,
-            "is_completed": True,
-        })
-    return rows
-
-def extract_google_shopping(raw, query, model):
-    """Extract Google Shopping data"""
-    rows = []
-    for item in raw.get("shopping_results", []):
-        rows.append({
-            "scrape_datetime": datetime.now(timezone.utc).isoformat(),
-            "source": "google_shopping",
-            "query": query,
-            "model": model,
-            "title": item.get("title"),
-            "price_raw": item.get("extracted_price") or item.get("price"),
+            "brand": brand,
+            "title": item.get("title", ""),
+            "price_raw": price,
             "condition_raw": item.get("condition"),
             "seller": item.get("source"),
             "is_sold": False,
-            "is_auction": False,
+            "is_active": True,
+            "has_bids": "bid" in item.get('title', '').lower(),
         })
     return rows
-
-# =========================
-# ENHANCED PRICE ANALYSIS
-# =========================
-
-def parse_price(price_raw):
-    """Improved price parsing"""
-    if price_raw is None:
-        return None
-    if isinstance(price_raw, (int, float)):
-        return float(price_raw)
-
-    text = str(price_raw)
-    # Remove currency symbols and text
-    text = re.sub(r'[$\€\£\¥\₩\₹]', '', text)
-    text = re.sub(r'[a-zA-Z]', '', text)
-    text = text.replace(',', '')
-    text = text.strip()
-    
-    match = re.search(r'(\d+\.?\d*)', text)
-    if match:
-        try:
-            return float(match.group(1))
-        except ValueError:
-            return None
-    return None
 
 def normalize_condition(cond_raw):
     if not cond_raw:
@@ -227,66 +324,32 @@ def normalize_condition(cond_raw):
 
 def normalize_rows(rows):
     for r in rows:
-        r["price"] = parse_price(r.pop("price_raw", None))
+        r["price"] = r.pop("price_raw", None)
         r["condition"] = normalize_condition(r.pop("condition_raw", None))
     return rows
 
-def calculate_price_distribution_metrics(sold_prices):
+# =========================
+# ENHANCED PRICE ANALYSIS
+# =========================
+
+def calculate_price_distribution_metrics(prices):
     """Calculate comprehensive price distribution metrics"""
-    if len(sold_prices) < 3:
+    if len(prices) < 2:
         return {}
     
-    prices = np.array(sold_prices)
+    prices_array = np.array(prices)
     
     return {
-        'mean': np.mean(prices),
-        'median': np.median(prices),
-        'std_dev': np.std(prices),
-        'q1': np.percentile(prices, 25),
-        'q3': np.percentile(prices, 75),
-        'iqr': np.percentile(prices, 75) - np.percentile(prices, 25),
-        'price_range': np.ptp(prices),
-        'coefficient_variation': (np.std(prices) / np.mean(prices)) * 100 if np.mean(prices) > 0 else 0,
-        'skewness': stats.skew(prices) if len(prices) > 2 else 0,
+        'mean': np.mean(prices_array),
+        'median': np.median(prices_array),
+        'std_dev': np.std(prices_array),
+        'q1': np.percentile(prices_array, 25),
+        'q3': np.percentile(prices_array, 75),
+        'iqr': np.percentile(prices_array, 75) - np.percentile(prices_array, 25),
+        'price_range': np.ptp(prices_array),
+        'coefficient_variation': (np.std(prices_array) / np.mean(prices_array)) * 100 if np.mean(prices_array) > 0 else 0,
+        'count': len(prices_array)
     }
-
-def analyze_price_sensitivity(sold_df, completed_df):
-    """Analyze price sensitivity and buyer resistance points"""
-    if sold_df.empty:
-        return {}
-    
-    sold_prices = sold_df['price'].dropna().tolist()
-    if not sold_prices:
-        return {}
-    
-    # Price brackets for analysis
-    max_price = max(sold_prices)
-    min_price = min(sold_prices)
-    price_range = max_price - min_price
-    
-    brackets = []
-    for i in range(5):
-        bracket_min = min_price + (i * price_range / 5)
-        bracket_max = min_price + ((i + 1) * price_range / 5)
-        brackets.append((bracket_min, bracket_max))
-    
-    sensitivity_analysis = {}
-    
-    # Analyze sell-through by price bracket
-    for i, (bracket_min, bracket_max) in enumerate(brackets):
-        bracket_sold = len([p for p in sold_prices if bracket_min <= p <= bracket_max])
-        bracket_total = bracket_sold  # Simplified - would need unsold data
-        
-        sell_through_rate = bracket_sold / bracket_total if bracket_total > 0 else 0
-        
-        sensitivity_analysis[f'bracket_{i+1}'] = {
-            'price_range': f"${bracket_min:.0f}-${bracket_max:.0f}",
-            'sold_count': bracket_sold,
-            'sell_through_rate': sell_through_rate,
-            'avg_price': (bracket_min + bracket_max) / 2
-        }
-    
-    return sensitivity_analysis
 
 def calculate_market_velocity(sold_df):
     """Calculate market velocity metrics"""
@@ -294,113 +357,164 @@ def calculate_market_velocity(sold_df):
         return {}
     
     total_sold = len(sold_df)
-    
-    # Estimate time period (assuming recent data represents current market)
     days_represented = 30  # Conservative estimate
     
-    velocity_metrics = {
+    return {
         'units_sold_per_week': (total_sold / days_represented) * 7,
         'total_sold_count': total_sold,
         'estimated_market_days': days_represented,
-        'velocity_score': min(total_sold / 10, 10)  # Scale 0-10
+        'velocity_score': min(total_sold / 10, 10)
     }
-    
-    return velocity_metrics
-
-def identify_price_ceiling(sold_prices, sensitivity_analysis):
-    """Identify the price ceiling where buyers stop purchasing"""
-    if not sold_prices or not sensitivity_analysis:
-        return None
-    
-    # Find the highest price bracket with good sell-through
-    viable_brackets = []
-    for bracket_key, analysis in sensitivity_analysis.items():
-        if analysis['sell_through_rate'] >= 0.5:  # 50%+ sell-through
-            viable_brackets.append(analysis['avg_price'])
-    
-    if viable_brackets:
-        price_ceiling = max(viable_brackets)
-        # Add small buffer
-        price_ceiling_adj = price_ceiling * 1.05
-        return price_ceiling_adj
-    
-    # Fallback: use 90th percentile of sold prices
-    return np.percentile(sold_prices, 90)
 
 # =========================
 # ENHANCED VISUALIZATIONS
 # =========================
 
-def create_price_distribution_chart(sold_prices, price_ceiling):
-    """Create enhanced price distribution visualization"""
-    if not sold_prices:
+def create_comparative_price_chart(sold_prices, active_prices, sold_metrics, active_metrics):
+    """Create side-by-side price distribution chart"""
+    if not sold_prices and not active_prices:
         return None
     
     fig = go.Figure()
     
-    # Histogram of sold prices
-    fig.add_trace(go.Histogram(
-        x=sold_prices,
-        name='Sales Distribution',
-        nbinsx=20,
-        opacity=0.7,
-        marker_color='lightblue'
-    ))
+    # Add sold prices histogram
+    if sold_prices:
+        fig.add_trace(go.Histogram(
+            x=sold_prices,
+            name='Sold Prices',
+            nbinsx=15,
+            opacity=0.7,
+            marker_color='green',
+            histnorm='probability'
+        ))
     
-    # Add price ceiling line
-    if price_ceiling:
+    # Add active prices histogram
+    if active_prices:
+        fig.add_trace(go.Histogram(
+            x=active_prices,
+            name='Active Listings',
+            nbinsx=15,
+            opacity=0.7,
+            marker_color='blue',
+            histnorm='probability'
+        ))
+    
+    # Add vertical lines for key metrics
+    if sold_prices and sold_metrics:
         fig.add_vline(
-            x=price_ceiling, 
-            line_dash="dash", 
-            line_color="red",
-            annotation_text=f"Price Ceiling: ${price_ceiling:.0f}"
+            x=sold_metrics.get('median', 0),
+            line_dash="dash",
+            line_color="darkgreen",
+            annotation_text=f"Sold Median: ${sold_metrics.get('median', 0):.0f}"
         )
     
-    # Add median line
-    median_price = np.median(sold_prices)
-    fig.add_vline(
-        x=median_price,
-        line_dash="dot",
-        line_color="green",
-        annotation_text=f"Median: ${median_price:.0f}"
-    )
+    if active_prices and active_metrics:
+        fig.add_vline(
+            x=active_metrics.get('median', 0),
+            line_dash="dash",
+            line_color="darkblue",
+            annotation_text=f"Active Median: ${active_metrics.get('median', 0):.0f}"
+        )
     
     fig.update_layout(
-        title='Price Distribution & Market Ceiling',
+        title='Price Distribution: Sold vs Active Listings',
         xaxis_title='Price ($)',
-        yaxis_title='Number of Sales',
+        yaxis_title='Probability Density',
+        barmode='overlay',
+        showlegend=True
+    )
+    
+    # Adjust opacity for better visibility
+    fig.update_traces(opacity=0.75)
+    
+    return fig
+
+def create_price_box_plot(sold_prices, active_prices):
+    """Create box plot comparison"""
+    if not sold_prices and not active_prices:
+        return None
+    
+    fig = go.Figure()
+    
+    if sold_prices:
+        fig.add_trace(go.Box(
+            y=sold_prices,
+            name='Sold Prices',
+            marker_color='green',
+            boxpoints='outliers'
+        ))
+    
+    if active_prices:
+        fig.add_trace(go.Box(
+            y=active_prices,
+            name='Active Listings',
+            marker_color='blue',
+            boxpoints='outliers'
+        ))
+    
+    fig.update_layout(
+        title='Price Distribution Comparison',
+        yaxis_title='Price ($)',
         showlegend=True
     )
     
     return fig
 
-def create_demand_curve(sensitivity_analysis):
-    """Create demand curve visualization"""
-    if not sensitivity_analysis:
+def create_market_gap_analysis(sold_metrics, active_metrics):
+    """Create market gap analysis visualization"""
+    if not sold_metrics or not active_metrics:
         return None
     
-    prices = []
-    sell_through_rates = []
-    
-    for bracket_key, analysis in sensitivity_analysis.items():
-        prices.append(analysis['avg_price'])
-        sell_through_rates.append(analysis['sell_through_rate'] * 100)  # Convert to percentage
+    categories = ['Median Price', 'Average Price', '25th Percentile', '75th Percentile']
+    sold_values = [
+        sold_metrics.get('median', 0),
+        sold_metrics.get('mean', 0),
+        sold_metrics.get('q1', 0),
+        sold_metrics.get('q3', 0)
+    ]
+    active_values = [
+        active_metrics.get('median', 0),
+        active_metrics.get('mean', 0),
+        active_metrics.get('q1', 0),
+        active_metrics.get('q3', 0)
+    ]
     
     fig = go.Figure()
     
-    fig.add_trace(go.Scatter(
-        x=prices,
-        y=sell_through_rates,
-        mode='lines+markers',
-        name='Sell-Through Rate',
-        line=dict(color='royalblue', width=3),
-        marker=dict(size=8)
+    fig.add_trace(go.Bar(
+        name='Sold',
+        x=categories,
+        y=sold_values,
+        marker_color='green',
+        text=[f'${v:,.0f}' for v in sold_values],
+        textposition='auto',
     ))
     
+    fig.add_trace(go.Bar(
+        name='Active',
+        x=categories,
+        y=active_values,
+        marker_color='blue',
+        text=[f'${v:,.0f}' for v in active_values],
+        textposition='auto',
+    ))
+    
+    # Calculate and display premium percentages
+    for i, (sold, active) in enumerate(zip(sold_values, active_values)):
+        if sold > 0:
+            premium_pct = ((active - sold) / sold) * 100
+            fig.add_annotation(
+                x=categories[i],
+                y=max(active, sold) + max(active, sold) * 0.1,
+                text=f"+{premium_pct:.1f}%",
+                showarrow=False,
+                font=dict(color="red" if premium_pct > 10 else "orange")
+            )
+    
     fig.update_layout(
-        title='Price Sensitivity & Demand Curve',
-        xaxis_title='Price ($)',
-        yaxis_title='Sell-Through Rate (%)',
+        title='Market Price Gap Analysis',
+        yaxis_title='Price ($)',
+        barmode='group',
         showlegend=True
     )
     
@@ -426,21 +540,39 @@ def main():
         
         st.subheader("Data Collection")
         ebay_pages = st.slider("eBay pages to analyze", 1, 5, 3)
-        include_completed = st.checkbox("Include completed listings analysis", value=True)
         
         if st.button("Clear Cache"):
             st.cache_data.clear()
             st.success("Cache cleared!")
 
-    # Main input
+    # Main input with ML product identification
     col1, col2 = st.columns(2)
     with col1:
-        model_input = st.text_input("Machine / model to analyze", value="Eppendorf 5415R")
-    with col2:
-        query_input = st.text_input(
-            "Search query (for eBay/Google)",
-            value="Eppendorf 5415R centrifuge"
+        search_input = st.text_input(
+            "What machine are you analyzing?",
+            value="Eppendorf 5415R centrifuge",
+            help="Describe the machine - we'll automatically identify the exact model"
         )
+    
+    with col2:
+        st.markdown("### Product Identification")
+        product_identifier = ProductIdentifier()
+        identified_product, confidence = product_identifier.identify_product(search_input)
+        
+        if identified_product:
+            st.success(f"**Identified**: {identified_product['name'].title()}")
+            st.caption(f"Confidence: {confidence:.1%}")
+            
+            # Use identified product for search
+            exact_model = identified_product['model']
+            brand = identified_product['brand']
+            precise_query = f"{brand} {exact_model}"
+        else:
+            st.warning("⚠️ No exact match found")
+            # Fallback to user input
+            exact_model = search_input
+            brand = search_input.split()[0] if search_input.split() else "unknown"
+            precise_query = search_input
     
     analyze_btn = st.button("🚀 Analyze Market Depth")
 
@@ -448,7 +580,7 @@ def main():
         st.caption("Enter your equipment details and click Analyze Market Depth")
         return
 
-    if not query_input.strip():
+    if not search_input.strip():
         st.warning("Please enter a search query")
         return
 
@@ -461,25 +593,24 @@ def main():
     status_text = st.empty()
 
     try:
-        status_text.text("📊 Fetching comprehensive eBay sold data...")
-        ebay_sold_raw = cached_ebay_comprehensive(query_input, api_key)
-        progress_bar.progress(25)
+        status_text.text("🔍 Identifying product and building precise search...")
+        time.sleep(1)
+        progress_bar.progress(20)
 
-        status_text.text("🔍 Analyzing completed listings...")
-        ebay_completed_raw = cached_ebay_completed(query_input, api_key) if include_completed else {"organic_results": []}
+        status_text.text("📊 Fetching refined eBay sold data...")
+        ebay_sold_raw = cached_ebay_sold(precise_query, api_key, exact_model, brand)
         progress_bar.progress(50)
 
-        status_text.text("🛒 Fetching Google Shopping data...")
-        gs_raw = cached_google(query_input, api_key)
-        progress_bar.progress(75)
+        status_text.text("🔄 Fetching current active listings...")
+        ebay_active_raw = cached_ebay_active(precise_query, api_key, exact_model, brand)
+        progress_bar.progress(80)
 
-        status_text.text("📈 Processing market data...")
+        status_text.text("📈 Processing and analyzing market data...")
         # Extract and normalize data
-        rows_ebay_sold = extract_ebay_sold_with_metrics(ebay_sold_raw, query_input, model_input)
-        rows_ebay_completed = extract_ebay_completed_listings(ebay_completed_raw, query_input, model_input)
-        rows_google = extract_google_shopping(gs_raw, query_input, model_input)
+        rows_ebay_sold = extract_ebay_sold_with_metrics(ebay_sold_raw, precise_query, exact_model, brand)
+        rows_ebay_active = extract_ebay_active_listings(ebay_active_raw, precise_query, exact_model, brand)
         
-        all_rows = normalize_rows(rows_ebay_sold + rows_ebay_completed + rows_google)
+        all_rows = normalize_rows(rows_ebay_sold + rows_ebay_active)
         df = pd.DataFrame(all_rows)
         
         progress_bar.progress(100)
@@ -495,22 +626,24 @@ def main():
         st.stop()
 
     if df.empty:
-        st.warning("No market data found. Try adjusting your search terms.")
+        st.warning("No relevant market data found. Try adjusting your search terms.")
         return
 
-    # Filter to valid sold data for core analysis
+    # Filter to valid data for analysis
     sold_df = df[df['is_sold'] & df['price'].notna()]
+    active_df = df[df['is_active'] & df['price'].notna()]
+    
     sold_prices = sold_df['price'].tolist()
+    active_prices = active_df['price'].tolist()
 
-    if not sold_prices:
-        st.warning("No valid sold price data found. Cannot perform market analysis.")
+    if not sold_prices and not active_prices:
+        st.warning("No valid price data found. Cannot perform market analysis.")
         return
 
     # Perform enhanced analysis
-    price_metrics = calculate_price_distribution_metrics(sold_prices)
-    sensitivity_analysis = analyze_price_sensitivity(sold_df, df)
+    sold_metrics = calculate_price_distribution_metrics(sold_prices) if sold_prices else {}
+    active_metrics = calculate_price_distribution_metrics(active_prices) if active_prices else {}
     velocity_metrics = calculate_market_velocity(sold_df)
-    price_ceiling = identify_price_ceiling(sold_prices, sensitivity_analysis)
 
     # Display Key Insights
     st.header("🎯 Market Intelligence Dashboard")
@@ -518,26 +651,38 @@ def main():
     # Key Metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        median_price = price_metrics.get('median', 0)
-        st.metric(
-            "True Market Price (Median)",
-            f"${median_price:,.0f}",
-            help="Median of actual sold prices - most accurate market value"
-        )
-    with col2:
-        price_range = f"${price_metrics.get('q1', 0):,.0f}-${price_metrics.get('q3', 0):,.0f}"
-        st.metric(
-            "Typical Price Range",
-            price_range,
-            help="25th-75th percentile range where most sales occur"
-        )
-    with col3:
-        if price_ceiling:
+        if sold_metrics:
+            median_sold = sold_metrics.get('median', 0)
             st.metric(
-                "Price Ceiling",
-                f"${price_ceiling:,.0f}",
-                help="Maximum price buyers are willing to pay"
+                "True Market Price (Sold Median)",
+                f"${median_sold:,.0f}",
+                help="Median of actual sold prices - most accurate market value"
             )
+        else:
+            st.metric("True Market Price", "No data")
+    
+    with col2:
+        if active_metrics:
+            median_active = active_metrics.get('median', 0)
+            st.metric(
+                "Current Asking Price (Active Median)",
+                f"${median_active:,.0f}",
+                help="Median of current active listings"
+            )
+        else:
+            st.metric("Current Asking Price", "No data")
+    
+    with col3:
+        if sold_metrics and active_metrics:
+            premium = ((active_metrics.get('median', 0) - sold_metrics.get('median', 0)) / sold_metrics.get('median', 0)) * 100
+            st.metric(
+                "Market Premium",
+                f"+{premium:.1f}%",
+                help="Asking price premium over actual sold prices"
+            )
+        else:
+            st.metric("Market Premium", "N/A")
+    
     with col4:
         velocity = velocity_metrics.get('units_sold_per_week', 0)
         st.metric(
@@ -547,80 +692,122 @@ def main():
         )
 
     # Price Analysis Section
-    st.subheader("💰 Price Distribution & Ceiling Analysis")
+    st.subheader("💰 Price Distribution Analysis")
     
-    if price_ceiling:
-        suggested_buy = price_ceiling - fees - refurb_cost - target_profit
+    if sold_metrics and active_metrics:
+        suggested_buy = sold_metrics.get('median', 0) * 0.8  # 20% below median sold
         st.success(f"**Recommended Maximum Buy Price: ${suggested_buy:,.0f}**")
-        st.caption(f"Based on price ceiling (${price_ceiling:,.0f}) minus costs and profit margin")
+        st.caption(f"Based on 20% below median sold price of ${sold_metrics.get('median', 0):,.0f}")
 
-    # Visualizations
+    # Enhanced Visualizations
     col1, col2 = st.columns(2)
+    
     with col1:
-        price_chart = create_price_distribution_chart(sold_prices, price_ceiling)
-        if price_chart:
-            st.plotly_chart(price_chart, use_container_width=True)
+        comparative_chart = create_comparative_price_chart(sold_prices, active_prices, sold_metrics, active_metrics)
+        if comparative_chart:
+            st.plotly_chart(comparative_chart, use_container_width=True)
+        else:
+            st.info("Not enough data for comparative analysis")
     
     with col2:
-        demand_chart = create_demand_curve(sensitivity_analysis)
-        if demand_chart:
-            st.plotly_chart(demand_chart, use_container_width=True)
+        box_plot = create_price_box_plot(sold_prices, active_prices)
+        if box_plot:
+            st.plotly_chart(box_plot, use_container_width=True)
         else:
-            st.info("Not enough data for demand curve analysis")
+            st.info("Not enough data for box plot analysis")
+
+    # Market Gap Analysis
+    if sold_metrics and active_metrics:
+        st.subheader("📊 Market Gap Analysis")
+        gap_chart = create_market_gap_analysis(sold_metrics, active_metrics)
+        if gap_chart:
+            st.plotly_chart(gap_chart, use_container_width=True)
 
     # Market Health Indicators
-    st.subheader("📊 Market Health Assessment")
+    st.subheader("📈 Market Health Assessment")
     
-    health_col1, health_col2, health_col3 = st.columns(3)
+    health_col1, health_col2, health_col3, health_col4 = st.columns(4)
     
     with health_col1:
-        # Price stability
-        cv = price_metrics.get('coefficient_variation', 0)
-        if cv < 15:
-            stability = "🏆 High Stability"
-            color = "green"
-        elif cv < 30:
-            stability = "⚠️ Moderate Stability"
-            color = "orange"
+        # Data quality
+        total_listings = len(sold_prices) + len(active_prices)
+        if total_listings >= 20:
+            quality = "🏆 Excellent"
+        elif total_listings >= 10:
+            quality = "✅ Good"
+        elif total_listings >= 5:
+            quality = "⚠️ Limited"
         else:
-            stability = "🔻 High Volatility"
-            color = "red"
-        st.metric("Price Stability", stability)
+            quality = "🔻 Poor"
+        st.metric("Data Quality", quality)
     
     with health_col2:
-        # Demand strength
-        velocity_score = velocity_metrics.get('velocity_score', 0)
-        if velocity_score >= 7:
-            demand = "🔥 Strong Demand"
-        elif velocity_score >= 4:
-            demand = "↗️ Moderate Demand"
+        # Price stability
+        if sold_metrics:
+            cv = sold_metrics.get('coefficient_variation', 0)
+            if cv < 15:
+                stability = "🏆 High Stability"
+            elif cv < 30:
+                stability = "⚠️ Moderate"
+            else:
+                stability = "🔻 High Volatility"
+            st.metric("Price Stability", stability)
         else:
-            demand = "💤 Weak Demand"
-        st.metric("Demand Strength", demand)
+            st.metric("Price Stability", "N/A")
     
     with health_col3:
-        # Market depth
-        sold_count = len(sold_prices)
-        if sold_count >= 20:
-            depth = "🌊 Deep Market"
-        elif sold_count >= 10:
-            depth = "💧 Moderate Depth"
+        # Market efficiency
+        if sold_metrics and active_metrics:
+            premium = ((active_metrics.get('median', 0) - sold_metrics.get('median', 0)) / sold_metrics.get('median', 0)) * 100
+            if premium < 10:
+                efficiency = "🏆 Efficient"
+            elif premium < 25:
+                efficiency = "⚠️ Moderate"
+            else:
+                efficiency = "🔻 Inefficient"
+            st.metric("Market Efficiency", efficiency)
         else:
-            depth = "⚠️ Thin Market"
-        st.metric("Market Depth", depth)
+            st.metric("Market Efficiency", "N/A")
+    
+    with health_col4:
+        # Inventory health
+        sold_count = len(sold_prices)
+        active_count = len(active_prices)
+        if active_count > 0:
+            ratio = sold_count / active_count if active_count > 0 else 0
+            if ratio > 2:
+                health = "🔥 High Demand"
+            elif ratio > 1:
+                health = "↗️ Balanced"
+            else:
+                health = "💤 Oversupply"
+            st.metric("Supply/Demand", health)
+        else:
+            st.metric("Supply/Demand", "N/A")
 
-    # Raw Data
-    st.subheader("📋 Raw Market Data")
-    display_cols = ["source", "is_sold", "price", "condition", "title", "seller"]
+    # Raw Data with filtering
+    st.subheader("📋 Filtered Market Data")
+    
+    # Show data quality metrics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Relevant Sold Listings", len(sold_prices))
+    with col2:
+        st.metric("Relevant Active Listings", len(active_prices))
+    with col3:
+        st.metric("Total Filtered", total_listings)
+    
+    display_cols = ["source", "is_sold", "is_active", "price", "condition", "title", "seller"]
     st.dataframe(df[display_cols], use_container_width=True)
 
     # Data Quality Note
     st.info(f"""
     **Analysis Notes:**
-    - Based on {len(sold_prices)} verified sales
-    - Price ceiling represents the maximum viable sale price
-    - Market velocity estimated from recent sales data
-    - Typical price range shows where 50% of sales occur
+    - **ML Product ID**: {identified_product['name'].title() if identified_product else 'Manual search'}
+    - **Precision Filtering**: Excluded parts/accessories/wrong models
+    - **Sold Data**: {len(sold_prices)} verified sales
+    - **Active Data**: {len(active_prices)} current listings
+    - **Price Extraction**: Enhanced multi-field parsing with title fallback
     """)
 
 if __name__ == "__main__":
